@@ -109,22 +109,21 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
     // on some elements), system fonts only, no <style>, no web fonts, no images except the optional logo.
     const logoUrl = process.env.NEXT_PUBLIC_LOGO_URL;
     const F = 'font-family:Arial,Helvetica,sans-serif';
-    const td = `${F};padding:8px 10px;border-bottom:1px solid #e4e7ec;font-size:13px;line-height:18px;vertical-align:top`;
-    const th = `${F};padding:8px 10px;font-size:12px;line-height:16px;font-weight:bold;color:#475467;text-align:left;border-bottom:2px solid #d0d5dd`;
+    const td = `${F};padding:8px 6px;border-bottom:1px solid #e4e7ec;font-size:13px;line-height:18px;vertical-align:top`;
+    const th = `${F};padding:8px 6px;font-size:12px;line-height:16px;font-weight:bold;color:#475467;text-align:left;border-bottom:2px solid #d0d5dd`;
     const accent = level >= 2 ? '#b42318' : '#1d4ed8';
     const rows = withLevels.map((i, n) => `
             <tr>
-              <td style="${td};color:#667085;width:24px">${n + 1}</td>
-              <td style="${td};color:#1a1a1a">${esc(location(i))}</td>
+              <td width="22" style="${td};color:#667085">${n + 1}</td>
+              <td width="30%" style="${td};color:#1a1a1a">${esc(location(i))}</td>
               <td style="${td};color:#1a1a1a">${esc(i.text)}${i.note ? `<br><span style="${F};color:#667085;font-size:12px;line-height:16px">${esc(i.note)}</span>` : ''}</td>
-              <td style="${td};color:#1a1a1a;white-space:nowrap">${formatDate(i.firstRaisedOn)}</td>
-              <td align="center" style="${td};text-align:center;${i.level >= 2 ? 'color:#b42318;font-weight:bold' : 'color:#1a1a1a'}">#${i.reminderNo}</td>
+              <td width="92" style="${td};color:#1a1a1a;white-space:nowrap">${formatDate(i.firstRaisedOn)}<br><span style="${F};font-size:12px;line-height:16px;${i.level >= 2 ? 'color:#b42318;font-weight:bold' : 'color:#667085'}">Reminder #${i.reminderNo}</span></td>
             </tr>`).join('');
     const html = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f2f4f7" style="background-color:#f2f4f7;border-collapse:collapse">
-  <tr><td align="center" style="padding:20px 8px">
+  <tr><td align="center" style="padding:16px 4px">
     <table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:680px;background-color:#ffffff;border-collapse:collapse;border:1px solid #e4e7ec">
       <tr><td bgcolor="${accent}" style="background-color:${accent};height:4px;line-height:4px;font-size:4px">&nbsp;</td></tr>
-      <tr><td style="padding:18px 24px 6px 24px">
+      <tr><td style="padding:16px 16px 6px 16px">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
           <tr>
             ${logoUrl ? `<td width="140" valign="middle" style="padding-right:12px"><img src="${esc(logoUrl)}" alt="VTech Technologies" width="120" style="display:block;border:0;outline:none;width:120px;height:auto"></td>` : ''}
@@ -132,29 +131,29 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
           </tr>
         </table>
       </td></tr>
-      <tr><td style="padding:6px 24px 0 24px;${F};font-size:20px;line-height:26px;font-weight:bold;color:#101828">${esc(project.name)}</td></tr>
-      <tr><td style="padding:2px 24px 14px 24px;${F};font-size:13px;line-height:18px;color:#475467">${esc(agency.typeName)} · ${esc(agency.companyName)} · ${withLevels.length} pending item${withLevels.length === 1 ? '' : 's'} · visit ${formatDate(visitDate)}</td></tr>
-      ${level >= 2 ? `<tr><td style="padding:0 24px 14px 24px">
+      <tr><td style="padding:6px 16px 0 16px;${F};font-size:20px;line-height:26px;font-weight:bold;color:#101828">${esc(project.name)}</td></tr>
+      <tr><td style="padding:2px 16px 14px 16px;${F};font-size:13px;line-height:18px;color:#475467">${esc(agency.typeName)} · ${esc(agency.companyName)}<br>${withLevels.length} pending item${withLevels.length === 1 ? '' : 's'} · site visit ${formatDate(visitDate)}</td></tr>
+      ${level >= 2 ? `<tr><td style="padding:0 16px 14px 16px">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
           <tr><td bgcolor="#fef3f2" style="background-color:#fef3f2;border-left:4px solid #b42318;padding:10px 12px;${F};font-size:13px;line-height:18px;color:#b42318"><b>This is an escalation (level ${level}).</b> Some items have remained pending across multiple reminders.</td></tr>
         </table>
       </td></tr>` : ''}
-      <tr><td style="padding:0 24px 12px 24px;${F};font-size:14px;line-height:20px;color:#1a1a1a">
+      <tr><td style="padding:0 16px 12px 16px;${F};font-size:14px;line-height:20px;color:#1a1a1a">
         <p style="margin:0 0 10px 0">Dear ${esc(er.to.map((c) => c.name).join(', '))},</p>
         <p style="margin:0">At our site visit on <b>${formatDate(visitDate)}</b> at <b>${esc(project.name)}</b>${project.clientName ? ` (${esc(project.clientName)})` : ''},
           the following ${esc(agency.typeName.toLowerCase())} items were found pending. Please complete them at the earliest.</p>
       </td></tr>
-      <tr><td style="padding:0 24px 8px 24px">
+      <tr><td style="padding:0 10px 8px 10px">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
           <thead><tr bgcolor="#f9fafb" style="background-color:#f9fafb">
             <th style="${th}">#</th><th style="${th}">Location</th><th style="${th}">Pending item</th>
-            <th style="${th};white-space:nowrap">First raised</th><th style="${th};text-align:center">Reminder</th></tr></thead>
+            <th style="${th};white-space:nowrap">First raised</th></tr></thead>
           <tbody>${rows}
           </tbody>
         </table>
       </td></tr>
-      <tr><td style="padding:12px 24px 0 24px;${F};font-size:12px;line-height:17px;color:#475467;white-space:pre-line">${esc(project.terms)}</td></tr>
-      <tr><td style="padding:16px 24px 22px 24px;${F};font-size:14px;line-height:20px;color:#1a1a1a">Regards,<br><b>${esc(pm.name)}</b><br>VTech Technologies${pm.phone ? ` | ${esc(pm.phone)}` : ''}</td></tr>
+      <tr><td style="padding:12px 16px 0 16px;${F};font-size:12px;line-height:17px;color:#344054;white-space:pre-line">${esc(project.terms)}</td></tr>
+      <tr><td style="padding:16px 16px 22px 16px;${F};font-size:14px;line-height:20px;color:#1a1a1a">Regards,<br><b>${esc(pm.name)}</b><br>VTech Technologies${pm.phone ? ` | ${esc(pm.phone)}` : ''}</td></tr>
     </table>
   </td></tr>
 </table>`;
