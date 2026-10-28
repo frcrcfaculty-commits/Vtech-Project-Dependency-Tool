@@ -23,6 +23,8 @@ export interface ReportItem {
 export interface ReportInput {
   project: { name: string; clientName: string | null; terms: string; policy: EscalationPolicy };
   visitDate: string; // ISO date
+  /** 'site_visit' (default): "At our site visit on …". 'follow_up': office reminder, "As of …, still pending". */
+  occasion?: 'site_visit' | 'follow_up';
   agency: { companyName: string; typeName: string; escalationEnabled: boolean; contacts: Contact[] };
   pm: { name: string; email: string; phone: string | null };
   management: { name: string; email: string }[];
@@ -60,6 +62,7 @@ const location = (i: ReportItem) => `${i.floorLabel} – ${i.roomName}`;
 
 export function buildAgencyReport(input: ReportInput): BuiltReport {
   const { project, agency, items, visitDate, pm } = input;
+  const followUp = input.occasion === 'follow_up';
   const policy = project.policy;
   const warnings: string[] = [];
 
@@ -92,8 +95,11 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
     const textLines = [
       `Dear ${er.to.map((c) => c.name).join(', ')},`,
       '',
-      `At our site visit on ${formatDate(visitDate)} at ${project.name}${project.clientName ? ` (${project.clientName})` : ''}, ` +
-        `the following ${agency.typeName.toLowerCase()} items were found pending. Please complete them at the earliest.`,
+      (followUp
+        ? `As of ${formatDate(visitDate)}, the following ${agency.typeName.toLowerCase()} items at ${project.name}${project.clientName ? ` (${project.clientName})` : ''} are still pending. `
+        : `At our site visit on ${formatDate(visitDate)} at ${project.name}${project.clientName ? ` (${project.clientName})` : ''}, ` +
+          `the following ${agency.typeName.toLowerCase()} items were found pending. `) +
+        'Please complete them at the earliest.',
       '',
       ...withLevels.map((i, n) =>
         `${n + 1}. ${location(i)}: ${i.text} — first raised ${formatDate(i.firstRaisedOn)}, reminder #${i.reminderNo}` +
@@ -132,7 +138,7 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
         </table>
       </td></tr>
       <tr><td style="padding:6px 16px 0 16px;${F};font-size:20px;line-height:26px;font-weight:bold;color:#101828">${esc(project.name)}</td></tr>
-      <tr><td style="padding:2px 16px 14px 16px;${F};font-size:13px;line-height:18px;color:#475467">${esc(agency.typeName)} · ${esc(agency.companyName)}<br>${withLevels.length} pending item${withLevels.length === 1 ? '' : 's'} · site visit ${formatDate(visitDate)}</td></tr>
+      <tr><td style="padding:2px 16px 14px 16px;${F};font-size:13px;line-height:18px;color:#475467">${esc(agency.typeName)} · ${esc(agency.companyName)}<br>${withLevels.length} pending item${withLevels.length === 1 ? '' : 's'} · ${followUp ? 'status as of' : 'site visit'} ${formatDate(visitDate)}</td></tr>
       ${level >= 2 ? `<tr><td style="padding:0 16px 14px 16px">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
           <tr><td bgcolor="#fef3f2" style="background-color:#fef3f2;border-left:4px solid #b42318;padding:10px 12px;${F};font-size:13px;line-height:18px;color:#b42318"><b>This is an escalation (level ${level}).</b> Some items have remained pending across multiple reminders.</td></tr>
@@ -140,8 +146,10 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
       </td></tr>` : ''}
       <tr><td style="padding:0 16px 12px 16px;${F};font-size:14px;line-height:20px;color:#1a1a1a">
         <p style="margin:0 0 10px 0">Dear ${esc(er.to.map((c) => c.name).join(', '))},</p>
-        <p style="margin:0">At our site visit on <b>${formatDate(visitDate)}</b> at <b>${esc(project.name)}</b>${project.clientName ? ` (${esc(project.clientName)})` : ''},
-          the following ${esc(agency.typeName.toLowerCase())} items were found pending. Please complete them at the earliest.</p>
+        <p style="margin:0">${followUp
+          ? `As of <b>${formatDate(visitDate)}</b>, the following ${esc(agency.typeName.toLowerCase())} items at <b>${esc(project.name)}</b>${project.clientName ? ` (${esc(project.clientName)})` : ''} are still pending.`
+          : `At our site visit on <b>${formatDate(visitDate)}</b> at <b>${esc(project.name)}</b>${project.clientName ? ` (${esc(project.clientName)})` : ''},
+          the following ${esc(agency.typeName.toLowerCase())} items were found pending.`} Please complete them at the earliest.</p>
       </td></tr>
       <tr><td style="padding:0 10px 8px 10px">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
@@ -174,7 +182,7 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
   } else {
     const head =
       `*VTech – ${project.name}*${level >= 2 ? `  ⚠️ Escalation L${level}` : ''}\n` +
-      `Site visit ${formatDate(visitDate)}: ${withLevels.length} pending ${agency.typeName.toLowerCase()} item${withLevels.length === 1 ? '' : 's'} (${agency.companyName}).\n\n`;
+      `${followUp ? 'Status as of' : 'Site visit'} ${formatDate(visitDate)}: ${withLevels.length} pending ${agency.typeName.toLowerCase()} item${withLevels.length === 1 ? '' : 's'} (${agency.companyName}).\n\n`;
     const foot = `\n\nPlease complete at the earliest. Once addressed, VTech needs 2–4 days to finish automation work. Kindly protect installed automation devices.\n– ${pm.name}, VTech`;
     let body = '';
     let shown = 0;

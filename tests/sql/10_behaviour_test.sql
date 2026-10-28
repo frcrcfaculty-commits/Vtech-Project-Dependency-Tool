@@ -231,4 +231,50 @@ exception when insufficient_privilege then raise notice 'ok - anon cannot read a
 end $$;
 reset role;
 
+-- ── 0006 office mode ──
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');  -- PM lead (the office user)
+set role authenticated;
+create temp table t_room as select r.id from public.rooms r join public.floors f on f.id=r.floor_id where f.label='13th Floor' and r.name='Living Room';
+create temp table t_m as select m.id from public.master_dependencies m join public.agency_types t on t.id=m.agency_type_id where t.name='Painter' and m.seq in (1,2);
+select pg_temp.assert(public.add_room_dependencies((select id from t_room), array(select id from t_m),
+  jsonb_build_array(jsonb_build_object('agency_type_id', (select id from public.agency_types where name='Carpenter'), 'text', 'Jaali panel cutout pending.'))) = 3,
+  'add_room_dependencies: 2 master + 1 custom added to one room');
+select pg_temp.assert(public.add_room_dependencies((select id from t_room), array(select id from t_m)) = 0, 'add_room_dependencies is idempotent');
+select pg_temp.assert((select count(*) from public.dependency_items i join public.project_dependencies d on d.id=i.project_dependency_id
+  where i.room_id=(select id from t_room) and d.text='Jaali panel cutout pending.' and i.agency_id is not null) = 1, 'custom item auto-assigned to the Carpenter agency');
+select pg_temp.assert(public.add_room_dependencies((select id from t_room), '{}',
+  jsonb_build_array(jsonb_build_object('agency_type_id', (select id from public.agency_types where name='Electrician'), 'text', 'Found today: DB label missing.')), 'pending', date '2026-10-29') = 1,
+  'on-the-go dependency added as pending');
+select pg_temp.assert((select i.status='pending' and i.first_raised_on=date '2026-10-29' from public.dependency_items i join public.project_dependencies d on d.id=i.project_dependency_id
+  where d.text='Found today: DB label missing.'), 'on-the-go item raised today');
+
+create temp table t_oi as select i.id from public.dependency_items i join public.project_dependencies d on d.id=i.project_dependency_id where d.text='Jaali panel cutout pending.';
+select public.set_item_status((select id from t_oi), 'pending', date '2026-10-29', 'Carpenter says Friday', 'p/x.webp');
+select pg_temp.assert((select status='pending' and first_raised_on=date '2026-10-29' and note='Carpenter says Friday' from public.dependency_items where id=(select id from t_oi)), 'set_item_status pending with note');
+select public.set_item_status((select id from t_oi), 'complete', date '2026-10-31');
+select pg_temp.assert((select status='complete' and completed_on=date '2026-10-31' and note='Carpenter says Friday' from public.dependency_items where id=(select id from t_oi)), 'set_item_status complete keeps note');
+select pg_temp.assert((select count(*) from public.item_events where item_id=(select id from t_oi)) = 2, 'item history has 2 events');
+do $$ begin
+  perform public.set_item_status((select id from t_oi), 'unchecked');
+  raise exception 'should have failed';
+exception when others then if sqlerrm not like 'status must be%' then raise; end if; raise notice 'ok - cannot set unchecked';
+end $$;
+
+create temp table t_fv as select public.start_office_followup((select id from public.projects limit 1)) as id;
+select pg_temp.assert((select kind='office' and status='finalized' from public.site_visits where id=(select id from t_fv)), 'office follow-up round is finalized and kind=office');
+reset role;
+
+select pg_temp.as_user('00000000-0000-0000-0000-000000000004');  -- PM2 was assigned; remove and check isolation of history
+reset role;
+delete from public.project_members where user_id='00000000-0000-0000-0000-000000000004';
+select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
+set role authenticated;
+select pg_temp.assert((select count(*) from public.item_events) = 0, 'unassigned PM sees no item history');
+do $$ begin
+  perform public.start_office_followup((select id from public.projects limit 1));
+  raise exception 'should have failed';
+exception when others then if sqlerrm not like '%no access%' then raise; end if; raise notice 'ok - unassigned PM cannot start follow-up';
+end $$;
+reset role;
+
 \echo ALL SQL TESTS PASSED

@@ -114,3 +114,16 @@ describe('digest', () => {
     expect(daysOpen('2026-10-24', '2026-10-31')).toBe(7);
   });
 });
+
+describe('office follow-up wording', () => {
+  it('follow_up says "still pending as of", site_visit says "At our site visit"', () => {
+    const site = buildAgencyReport(base([item()]));
+    const fu = buildAgencyReport({ ...base([item()]), occasion: 'follow_up' });
+    expect(site.email!.text).toContain('At our site visit on');
+    expect(fu.email!.text).toContain('are still pending');
+    expect(fu.email!.text).not.toContain('site visit');
+    expect(fu.email!.html).toContain('still pending');
+    expect(fu.whatsapp!.text).toContain('Status as of');
+    expect(site.whatsapp!.text).toContain('Site visit');
+  });
+});

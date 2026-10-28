@@ -89,3 +89,29 @@ Supabase Pro ($25/mo) includes 100 GB; free tier 1 GB. Photos are not a cost con
 
 ## 9. Not in v1
 Agency portal or agency self-reporting · offline-first sync (v1 queues failed saves and retries) · merging with the BOQ tool (planned later; same Supabase project can host both).
+
+## 10. Office mode (v2, Vipul 2026-10-29) — the default workflow
+**Who:** one PM lead (role `pm_lead`) sitting in the office. Site people phone/text him; he enters everything, follows up with
+every agency, and reports to Vipul. Desktop first, must still work on a phone.
+
+**What stays:** project creation, agencies and contacts, escalation policy, the dispatch engine, review & send, PDF, digest.
+The v1 site-visit screens (S5 visit checklist, project-wide dependency matrix) are **kept in the code and still work** —
+reachable as "Site visit mode (classic)". Do not delete them: they are the basis of the future generic multi-vendor app.
+
+**What changes**
+1. Setup: floors default to **1** (more can be added/copied).
+2. Dependencies are added **per room**: pick a room → full master list (78 items, grouped by agency type, searchable) + custom → save.
+3. **Hub (master dashboard)**: project tiles on top → pick a project → rooms (by floor) → every dependency with **Done / Pending / N.A.**
+   Any status change can carry a **note and a photo**. Changes apply immediately (no visit to finalize) and are kept in history.
+4. **Pending list**: every pending dependency across projects, filterable; select items → send reminders (email + WhatsApp per agency)
+   through the existing review & send screen.
+5. **"+ Add dependency" on every page**: master list + custom, can be marked Pending immediately (raised today).
+
+**Backend (done, live, tested — 54 SQL checks):**
+| Call | Does |
+|---|---|
+| `rpc('add_room_dependencies', {p_room, p_master_ids, p_custom, p_initial_status, p_date})` | Adds master ids + custom `[{agency_type_id,text}]` to one room. Idempotent. `p_initial_status` `'unchecked'` (default) or `'pending'`. Returns number of new items. Items auto-assigned to the project's agency of that type. |
+| `rpc('set_item_status', {p_item, p_status, p_date, p_note, p_photo})` | Done/Pending/N.A. right now. Same rules as a finalized visit (new pending episode → raised date = p_date, reminder count 0; done → completed date). Writes `item_events`. Returns the updated item. |
+| table `item_events` | History per item (status, date, note, photo, source office/visit, who, when). RLS by project. |
+| `POST /api/projects/{projectId}/reminders` `{agencyIds?, itemIds?}` | Opens an office follow-up round and builds drafts for the chosen pending items. Returns `{visitId, dispatches, warnings}`; `visitId` is null when nothing to send. Then open `/projects/{projectId}/visits/{visitId}/dispatches` (existing review & send). Messages say "As of <date> … still pending" instead of "At our site visit". |
+| `site_visits.kind` | `'site'` (classic) or `'office'` (follow-up rounds). |

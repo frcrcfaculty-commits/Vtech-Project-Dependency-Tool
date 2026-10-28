@@ -29,9 +29,16 @@ export interface PrepareResult {
   warnings: string[];
 }
 
-export async function prepareDispatches(db: Db, me: Me, visitId: string): Promise<PrepareResult> {
+export interface PrepareOptions {
+  /** Only these agencies (default: every agency with pending items). */
+  agencyIds?: string[];
+  /** Only these pending items (default: all pending items of the selected agencies). */
+  itemIds?: string[];
+}
+
+export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: PrepareOptions = {}): Promise<PrepareResult> {
   const { data: visit, error: vErr } = await db.from('site_visits')
-    .select('id, project_id, visit_date, status').eq('id', visitId).single();
+    .select('id, project_id, visit_date, status, kind').eq('id', visitId).single();
   if (vErr || !visit) throw new HttpError(404, 'Visit not found');
   if (visit.status === 'draft') throw new HttpError(409, 'Finalize the visit before preparing reminders');
 
@@ -53,7 +60,11 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string): Promis
 
   const warnings: string[] = [];
   const byAgency = new Map<string, ReportItem[]>();
+  const onlyAgencies = opts.agencyIds?.length ? new Set(opts.agencyIds) : null;
+  const onlyItems = opts.itemIds?.length ? new Set(opts.itemIds) : null;
   for (const r of (items ?? []) as ItemRow[]) {
+    if (onlyItems && !onlyItems.has(r.id)) continue;
+    if (onlyAgencies && (!r.agency_id || !onlyAgencies.has(r.agency_id))) continue;
     const room = one(r.rooms), floor = one(room.floors), dep = one(r.project_dependencies);
     if (!r.agency_id) { warnings.push(`"${dep.text}" in ${floor.label} – ${room.name} has no agency assigned; not sent.`); continue; }
     const list = byAgency.get(r.agency_id) ?? [];
@@ -76,6 +87,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string): Promis
         policy: { l2After: project.l2_after, l3After: project.l3_after, mgmtCcLevel: project.mgmt_cc_level },
       },
       visitDate: visit.visit_date,
+      occasion: visit.kind === 'office' ? 'follow_up' : 'site_visit',
       agency: { companyName: a.company_name, typeName, escalationEnabled: a.escalation_enabled, contacts },
       pm: { name: me.fullName, email: me.email, phone: me.phone },
       management: ((mgmt ?? []) as { full_name: string; email: string }[]).map((m) => ({ name: m.full_name, email: m.email })),
