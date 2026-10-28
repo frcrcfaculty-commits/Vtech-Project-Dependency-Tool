@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+/* ── Design tokens ──
+   Neutral base (zinc), one accent (blue-600), red only for escalation/pending-overdue.
+   Follows taste-skill rules: no gradients, no card-in-card, no decorative icons. */
+
+@theme {
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-light: #dbeafe;
+  --color-danger: #dc2626;
+  --color-danger-light: #fee2e2;
+  --color-warning: #d97706;
+  --color-warning-light: #fef3c7;
+  --color-success: #16a34a;
+  --color-success-light: #dcfce7;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f4f4f5;
+  --color-border: #e4e4e7;
+  --color-text-primary: #18181b;
+  --color-text-secondary: #71717a;
+  --color-text-muted: #a1a1aa;
+}
+
+/* ── Base styles ── */
+body {
+  @apply bg-surface text-text-primary antialiased;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Typography hierarchy ── */
+h1 { @apply text-2xl font-semibold tracking-tight; }
+h2 { @apply text-xl font-semibold tracking-tight; }
+h3 { @apply text-lg font-medium; }
+
+/* ── Mobile-first: big tap targets ── */
+button, [role="button"], a {
+  @apply touch-manipulation;
+}
+
+/* ── Utility: safe area padding for phones ── */
+.safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+}
+
