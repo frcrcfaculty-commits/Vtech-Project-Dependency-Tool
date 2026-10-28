@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, use } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { AppHeader } from '@/components/app-header';
+import { RoomDependencyPicker } from '@/components/room-dependency-picker';
 import Link from 'next/link';
 
 interface Floor {
@@ -81,6 +82,8 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
   // Step state: 1: Basics, 2: Floors & Rooms, 3: Agencies, 4: Dependencies, 5: Apply to Rooms, 6: Escalation & Terms
   const initialStep = Math.max(1, Math.min(6, parseInt(searchParams.get('step') ?? '2', 10)));
   const [currentStep, setCurrentStep] = useState(initialStep);
+  const [isClassic, setIsClassic] = useState(searchParams.get('mode') === 'classic');
+  const [wizardRoomId, setWizardRoomId] = useState<string>('');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -165,9 +168,29 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
       if (mdErr) throw new Error(mdErr.message);
       if (pdErr) throw new Error(pdErr.message);
 
+      let activeFloors = fls ?? [];
+      // O1: Floors default to 1 pre-filled floor
+      if (activeFloors.length === 0) {
+        const { data: newF } = await sb
+          .from('floors')
+          .insert({
+            project_id: projectId,
+            label: '1st Floor',
+            sort: 1,
+          })
+          .select('*')
+          .single();
+        if (newF) {
+          activeFloors = [newF];
+        }
+      }
+
       setProject(proj as ProjectData);
-      setFloors(fls ?? []);
+      setFloors(activeFloors);
       setRooms(rms ?? []);
+      if (rms && rms.length > 0) {
+        setWizardRoomId((prev) => prev || rms[0].id);
+      }
       setAgencyTypes(aTypes ?? []);
       setAgencies((ags as Agency[]) ?? []);
       setMasterDeps(mDeps ?? []);
@@ -299,6 +322,19 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
       setError(err instanceof Error ? err.message : 'Failed to delete room');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleUpdateFloorLabel(floorId: string, newLabel: string) {
+    const trimmed = newLabel.trim();
+    if (!trimmed) return;
+    try {
+      const sb = supabaseBrowser();
+      const { error: err } = await sb.from('floors').update({ label: trimmed }).eq('id', floorId);
+      if (err) throw err;
+      setFloors((prev) => prev.map((f) => (f.id === floorId ? { ...f, label: trimmed } : f)));
+    } catch (err) {
+      console.error('Failed to update floor label:', err);
     }
   }
 
@@ -501,20 +537,28 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
     );
   }
 
-  const stepsList = [
-    { num: 1, label: 'Basics' },
-    { num: 2, label: 'Floors & Rooms' },
-    { num: 3, label: 'Agencies' },
-    { num: 4, label: 'Dependencies' },
-    { num: 5, label: 'Apply Grid' },
-    { num: 6, label: 'Escalation' },
-  ];
+  const stepsList = isClassic
+    ? [
+        { num: 1, label: 'Basics' },
+        { num: 2, label: 'Floors & Rooms' },
+        { num: 3, label: 'Agencies' },
+        { num: 4, label: 'Bulk Dependencies' },
+        { num: 5, label: 'Apply Grid' },
+        { num: 6, label: 'Escalation' },
+      ]
+    : [
+        { num: 1, label: 'Basics' },
+        { num: 2, label: 'Floors & Rooms' },
+        { num: 3, label: 'Agencies' },
+        { num: 4, label: 'Room Dependencies' },
+        { num: 5, label: 'Escalation' },
+      ];
 
   return (
     <div className="min-h-dvh bg-surface-alt pb-16">
       <AppHeader />
 
-      <main className="mx-auto max-w-2xl px-4 pt-5">
+      <main className="mx-auto max-w-4xl px-4 pt-5">
         {/* Header navigation & title */}
         <div className="mb-4">
           <Link
@@ -526,12 +570,26 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
             </svg>
             Projects
           </Link>
-          <h1 className="text-xl font-bold tracking-tight text-text-primary">
-            Project Setup: {project?.name}
-          </h1>
-          <p className="text-xs text-text-secondary mt-0.5">
-            Step {currentStep} of 6 — Each step saves immediately. You can exit and resume anytime.
-          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-text-primary">
+                Project Setup: {project?.name}
+              </h1>
+              <p className="text-xs text-text-secondary mt-0.5">
+                Step {currentStep} of {isClassic ? 6 : 5} — Each step saves immediately. You can exit and resume anytime.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsClassic(!isClassic);
+                if (currentStep > 3) setCurrentStep(4);
+              }}
+              className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline shrink-0"
+            >
+              {isClassic ? 'Switch to Office room-by-room setup →' : 'Switch to Classic matrix setup →'}
+            </button>
+          </div>
         </div>
 
         {/* Wizard Step Pills Bar */}
@@ -679,7 +737,21 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-surface-alt text-xs font-bold text-text-secondary">
                             #{floor.sort}
                           </span>
-                          <h3 className="text-base font-bold text-text-primary">{floor.label}</h3>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              aria-label="Floor label"
+                              defaultValue={floor.label}
+                              onBlur={(e) => handleUpdateFloorLabel(floor.id, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  (e.target as HTMLInputElement).blur();
+                                }
+                              }}
+                              className="text-base font-bold text-text-primary bg-transparent border-b border-transparent hover:border-border focus:border-accent focus:bg-surface px-1 py-0.5 rounded transition-colors w-32 sm:w-44"
+                            />
+                            <span className="text-[10px] text-text-muted italic hidden sm:inline">(editable)</span>
+                          </div>
                           <span className="text-xs text-text-muted">({floorRooms.length} rooms)</span>
                         </div>
 
@@ -887,30 +959,101 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                 onClick={() => setCurrentStep(4)}
                 className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-accent-hover transition-colors"
               >
-                Next: Dependencies ({projectDeps.length}) →
+                Next: Dependencies →
               </button>
             </div>
           </div>
         )}
 
-        {/* ───────────────────────── STEP 4 ───────────────────────── */}
-        {currentStep === 4 && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
+        {/* ───────────────────────── STEP 4 (OFFICE MODE): ROOM-BY-ROOM ───────────────────────── */}
+        {!isClassic && currentStep === 4 && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h2 className="text-base font-semibold text-text-primary">Dependencies Checklist</h2>
-                <p className="text-xs text-text-secondary">
-                  Pick dependencies from VTech&apos;s approved master list or add site-specific custom items.
+                <h2 className="text-base font-semibold text-text-primary">
+                  Step 4: Room-by-Room Dependencies
+                </h2>
+                <p className="text-xs text-text-secondary mt-0.5">
+                  Configure trade dependencies room by room. You can also edit these anytime later.
                 </p>
               </div>
 
               <button
                 type="button"
-                onClick={() => setShowCustomDepModal(true)}
-                className="inline-flex items-center gap-1 rounded-lg bg-surface-alt px-3 py-2 text-xs font-medium text-text-primary border border-border hover:bg-border transition-colors"
+                onClick={() => setIsClassic(true)}
+                className="text-xs text-accent hover:underline text-left sm:text-right"
               >
-                + Add Custom Item
+                Switch to classic bulk matrix setup →
               </button>
+            </div>
+
+            {rooms.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border bg-surface p-8 text-center text-xs text-text-muted space-y-3">
+                <p>No rooms added yet. Please add at least one room in Step 2 first.</p>
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(2)}
+                  className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-white"
+                >
+                  ← Go to Step 2: Floors &amp; Rooms
+                </button>
+              </div>
+            ) : (
+              <RoomDependencyPicker
+                projectId={projectId}
+                roomId={wizardRoomId || rooms[0]?.id}
+                onRoomChange={(newId) => setWizardRoomId(newId)}
+                onFinish={() => setCurrentStep(5)}
+                isWizard={true}
+              />
+            )}
+
+            <div className="flex justify-between pt-2">
+              <button
+                type="button"
+                onClick={() => setCurrentStep(3)}
+                className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-surface transition-colors"
+              >
+                ← Back to Agencies
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentStep(5)}
+                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-accent-hover transition-colors"
+              >
+                Next: Escalation &amp; Terms →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ───────────────────────── STEP 4 (CLASSIC MODE): BULK MASTER PICK ───────────────────────── */}
+        {isClassic && currentStep === 4 && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-text-primary">Dependencies Checklist (Classic)</h2>
+                <p className="text-xs text-text-secondary">
+                  Pick dependencies from VTech&apos;s approved master list or add site-specific custom items.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsClassic(false)}
+                  className="text-xs text-accent hover:underline"
+                >
+                  Switch to room-by-room setup
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCustomDepModal(true)}
+                  className="inline-flex items-center gap-1 rounded-lg bg-surface-alt px-3 py-2 text-xs font-medium text-text-primary border border-border hover:bg-border transition-colors"
+                >
+                  + Add Custom Item
+                </button>
+              </div>
             </div>
 
             {/* Currently picked dependencies summary */}
@@ -1058,11 +1201,11 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
           </div>
         )}
 
-        {/* ───────────────────────── STEP 5 ───────────────────────── */}
-        {currentStep === 5 && (
+        {/* ───────────────────────── STEP 5 (CLASSIC MODE): APPLY GRID ───────────────────────── */}
+        {isClassic && currentStep === 5 && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-base font-semibold text-text-primary">Apply Dependencies to Rooms</h2>
+              <h2 className="text-base font-semibold text-text-primary">Apply Dependencies to Rooms (Classic Matrix)</h2>
               <p className="text-xs text-text-secondary mt-0.5">
                 Matrix: {projectDeps.length} dependencies × {rooms.length} rooms ({existingItems.length} currently applied).
               </p>
@@ -1127,11 +1270,11 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
           </div>
         )}
 
-        {/* ───────────────────────── STEP 6 ───────────────────────── */}
-        {currentStep === 6 && (
+        {/* ───────────────────────── ESCALATION & TERMS STEP ───────────────────────── */}
+        {((!isClassic && currentStep === 5) || (isClassic && currentStep === 6)) && (
           <div className="rounded-2xl border border-border bg-surface p-6 shadow-xs">
             <h2 className="text-base font-semibold text-text-primary mb-1">
-              Step 6: Escalation Policy &amp; Terms
+              Step {isClassic ? 6 : 5}: Escalation Policy &amp; Terms
             </h2>
             <p className="text-xs text-text-secondary mb-4">
               Configure reminder thresholds and general disclaimer terms for site visit reports.
@@ -1205,7 +1348,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
               <div className="flex justify-between pt-4 border-t border-border">
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(5)}
+                  onClick={() => setCurrentStep(isClassic ? 5 : 4)}
                   className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-surface-alt transition-colors"
                 >
                   ← Back
