@@ -512,7 +512,7 @@ export default function SiteVisitPage({
                 <div className="space-y-2.5">
                   {group.items.map((item) => {
                     const check = checks.get(item.id);
-                    const currentStatus = check?.status ?? (item.status === 'unchecked' ? null : item.status);
+                    const currentStatus = check?.status ?? null;
                     const hasNote = Boolean(check?.note || item.note);
                     const hasPhoto = Boolean(check?.photo_path || item.photo_path);
 
@@ -543,6 +543,11 @@ export default function SiteVisitPage({
                             {item.reminder_count > 0 && (
                               <span className="rounded-sm bg-warning-light px-1.5 py-0.2 text-[10px] font-semibold text-warning">
                                 {item.reminder_count} chased
+                              </span>
+                            )}
+                            {item.status && item.status !== 'unchecked' && !check?.status && (
+                              <span className="text-text-muted">
+                                Last: <span className="font-medium text-text-secondary capitalize">{item.status}</span>
                               </span>
                             )}
                             {check?.status_date && currentStatus === 'complete' && (

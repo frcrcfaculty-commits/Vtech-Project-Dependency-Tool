@@ -236,7 +236,7 @@ export default function ProjectHomePage({
   const pendingItems = items.filter((i) => i.status === 'pending');
   const completedItems = items.filter((i) => i.status === 'complete');
   const escalatedItems = pendingItems.filter(
-    (i) => i.reminder_count >= (project?.l2_after ?? 3)
+    (i) => i.reminder_count > (project?.l2_after ?? 3)
   );
 
   // Pending breakdown by agency
@@ -351,7 +351,7 @@ export default function ProjectHomePage({
               <div className="rounded-2xl border border-border bg-surface p-4 shadow-xs">
                 <p className="text-xs font-medium text-text-secondary">Escalated (L2+)</p>
                 <p className="text-2xl font-bold text-danger mt-1">{escalatedItems.length}</p>
-                <p className="text-[11px] text-text-muted mt-0.5">Threshold &ge; {project?.l2_after}</p>
+                <p className="text-[11px] text-text-muted mt-0.5">Threshold &gt; {project?.l2_after}</p>
               </div>
 
               <div className="rounded-2xl border border-border bg-surface p-4 shadow-xs">
@@ -483,6 +483,7 @@ export default function ProjectHomePage({
                 >
                   <option value="all">All Statuses ({items.length})</option>
                   <option value="pending">Pending ({pendingItems.length})</option>
+                  <option value="escalated">Escalated ({escalatedItems.length})</option>
                   <option value="complete">Complete ({completedItems.length})</option>
                   <option value="unchecked">Unchecked</option>
                   <option value="na">N.A.</option>
@@ -515,6 +516,9 @@ export default function ProjectHomePage({
                     {items
                       .filter((i) => {
                         if (gridAgencyFilter !== 'all' && i.agency_id !== gridAgencyFilter) return false;
+                        if (gridStatusFilter === 'escalated') {
+                          return i.status === 'pending' && i.reminder_count > (project?.l2_after ?? 3);
+                        }
                         if (gridStatusFilter !== 'all' && i.status !== gridStatusFilter) return false;
                         return true;
                       })
@@ -539,13 +543,17 @@ export default function ProjectHomePage({
                                 item.status === 'complete'
                                   ? 'bg-success-light text-success'
                                   : item.status === 'pending'
-                                  ? 'bg-warning-light text-warning'
+                                  ? item.reminder_count > (project?.l2_after ?? 3)
+                                    ? 'bg-danger-light text-danger'
+                                    : 'bg-warning-light text-warning'
                                   : item.status === 'na'
                                   ? 'bg-surface-alt text-text-muted'
                                   : 'bg-surface-alt text-text-secondary'
                               }`}
                             >
-                              {item.status}
+                              {item.status === 'pending' && item.reminder_count > (project?.l2_after ?? 3)
+                                ? 'escalated'
+                                : item.status}
                             </span>
                           </td>
                           <td className="p-3 text-right text-text-muted font-mono">
