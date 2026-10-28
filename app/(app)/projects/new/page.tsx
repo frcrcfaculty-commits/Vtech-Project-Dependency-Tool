@@ -41,6 +41,13 @@ export default function NewProjectPage() {
         throw new Error(insertError.message);
       }
 
+      // Pre-fill exactly 1 floor (O1 setup requirement)
+      await sb.from('floors').insert({
+        project_id: project.id,
+        label: '1st Floor',
+        sort: 1,
+      });
+
       router.push(`/projects/${project.id}/setup`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project');
