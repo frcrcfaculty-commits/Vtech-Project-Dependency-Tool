@@ -1,0 +1,79 @@
+agency_type,seq,text,active,origin,original_text
+Electrician,1,Regular ceiling lights not yet installed.,true,master,Regular Lights are yet not installed in the ceiling.
+Electrician,2,Decorative ceiling lights not yet installed.,true,master,Decorative Lights are yet not installed in the ceiling
+Electrician,3,Decorative floor/table lights not yet installed.,true,master,Decorative Floor/ table Lights are yet not installed.
+Electrician,4,Ceiling fan not yet installed.,true,master,Ceiling fan not installed yet.
+Electrician,5,Ferruling list not yet provided.,true,master,Ferulling list not yet  provided.
+Electrician,6,Wi-Fi access point cable not at its position.,true,master,Wifi access point cable not at its position.
+Electrician,7,Curtain motor cable not at its position.,true,master,Curtain motor cable not at its position.
+Electrician,8,Speaker cable not at its position.,true,master,Speaker cable not at its position
+Electrician,9,Wall panel cable not at its position.,true,master,Wall Panel Cable not its posioton
+Electrician,10,QSM / RF gateway device cables not at their position.,true,master,QSM / RF Gateway  Devices Cables not its position
+Electrician,11,CCTV / video door phone cable not at its position.,true,master,CCTV Video door Phone
+Electrician,12,AC IR cables not at their position.,true,master,AC IR Cables not its position
+Electrician,13,CoolMaster-to-outdoor-unit cabling not at its position.,true,master,From Coolmsater to Outdoor Cabling not its position
+Electrician,14,Telephone port cabling not at its position.,true,master,Cabling for Telephone Ports not its position
+Electrician,15,TV control cable not at its position.,true,master,TV control cable not its position
+Electrician,16,Power supply not provided in the rack.,true,master,Power supply not provided in the rack
+Electrician,17,eKey cables not provided.,true,master,Ekey Cables not provided
+Electrician,18,eKey back box not installed.,true,master,Ekey Backbox not installed
+Electrician,19,Door lock releaser cabling not provided.,true,master,Door Lock Releaser Cabling not Provided
+Electrician,20,Keypad back box not installed.,true,master,Keypad Backbox not installed
+Electrician,21,Face reader installation pending.,true,master,"(from Specimen, approved by VTech 2026-10-28) Face reader installation pending (wall not final)."
+Electrician,22,On/off lights installation pending.,true,master,"(from Specimen, approved by VTech 2026-10-28) On/off lights installation pending."
+Electrician,23,Cove light DALI connection pending.,true,master,"(from Specimen, approved by VTech 2026-10-28) Cove DALI connection pending."
+Carpenter,1,Keypad cutout not done.,true,master,Keypad cutout not done
+Carpenter,2,Console for housing rack equipment not yet provided.,true,master,Console yet not provided for housing rack equipments.
+Carpenter,3,eKey cutout not done.,true,master,ekey cutout not done
+Carpenter,4,VDP (video door phone) cutout not done.,true,master,"VDV,"
+Carpenter,5,Door lock cutout not done.,true,master,Door lock
+Carpenter,6,Ventilation not yet provided in the rack.,true,master,Ventilation not yet provided in the rack.
+Carpenter,7,Door magnet cutout pending.,true,master,"(from Specimen, approved by VTech 2026-10-28) Door bolt installation done; door magnet cutout pending."
+Painter,1,Curtain tracks not covered to protect from dust.,true,master,Curtian tracks to be covered to safeguard from dust
+Painter,2,DB room wall/ceiling work not complete.,true,master,DB room / wall / ceiling yet not complete.
+Painter,3,Keypad/touch panel not covered to protect from dust.,true,master,Keypad /touch panel not covered to safeguard from dust.
+AC Vendor,1,Addressing list not provided in the format shared by VTech.,true,master,Need a addressing list as per the format provided by VTECH earlier.
+AC Vendor,2,Outdoor termination of automation cable not done.,true,master,Outdoor termination of automation cable needs to be done
+AC Vendor,3,CoolMaster / BACnet addressing pending.,true,master,Coolmaster / Bacnet  Addressing
+Network Agency,1,Wi-Fi access points not yet installed and activated.,true,master,Wifi access poitn yet not instyalled and activated.
+Network Agency,2,Back-end network switch/router not yet installed.,true,master,Back end network switch / router yet not installed
+Network Agency,3,Back-end network switch/router not yet programmed.,true,master,Back end network switch / router yet not programmed
+Network Agency,4,Local network not yet functional.,true,master,Functionality of Local Network
+Network Agency,5,IP range and network details not provided.,true,master,IP range and Netwrok details
+Network Agency,6,Static IP / port forwarding not provisioned.,true,master,Static IP / Port forwarding Provision
+Network Agency,7,NAX and NVX network requirements not configured.,true,master,NAX and NVX Network Requirements configuration
+AV Vendor,1,Speakers not yet installed at their positions.,true,master,Speakers yet not installed at their positions
+AV Vendor,2,Display device not yet installed for VTech to control.,true,master,Display device yet not installed  yet not installed for VTECH to  control
+AV Vendor,3,Amplifier/home theatre system not yet installed for VTech to control.,true,master,Amplfiier /home theatre systems yet not installed for VTECH to  control
+AV Vendor,4,"Set-top box, streaming devices, Apple TV not yet installed for VTech to control.",true,master,"Settop box, streaming devices, ATV yet not installed for VTECH to  control"
+AV Vendor,5,AV configuration not done.,true,master,AV Configration not done yet  +  AV Configration (duplicate row merged)
+Curtain Vendor,1,Curtain motor installation pending.,true,master,Curtain Motor Installation is  Pending (owner was 'Curtain Vendor / Vtech')
+Curtain Vendor,2,Curtain fabric installation pending.,true,master,Curtain Fabric Installation is pending
+Curtain Vendor,3,Roller blind fabric installation pending.,true,master,"(from Specimen, approved by VTech 2026-10-28) Roller fabric installation pending."
+VTech,1,Network testing report (speed and range) pending.,true,master,Network Testing Report ( Speed and Range)
+VTech,2,Automation device installation with power supply pending.,true,master,Autoamtion Device Installation with power supply
+VTech,3,Lighting details pending.,true,master,Lights Details
+VTech,4,Curtain details pending.,true,master,Curtain Detail
+VTech,5,Fan details pending.,true,master,Fan Details
+VTech,6,Sensor installation pending.,true,master,Sensor Installation
+VTech,7,QSM / Lutron RF / Crestron RF gateway installation pending.,true,master,QSM / Lutron RF / Crestron RF Gateway Installation
+VTech,8,Keypad installation pending.,true,master,Keypad Installation
+VTech,9,Crestron amplifier installation pending.,true,master,Crestron Amplifier Installation
+VTech,10,Speaker installation pending.,true,master,Speaker Installation
+VTech,11,AV details and IR/network connectivity pending.,true,master,AV Details and IR / Network Connectivity
+VTech,12,Door lock installation pending.,true,master,Door Lock Installation
+VTech,13,Keypad and Pico engraving pending.,true,master,Keypad and Pico Engraving
+VTech,14,Rack exhaust fan installation pending.,true,master,Rack Exhaust Fan Installation
+VTech,15,Call bell installation pending.,true,master,Call Bell Installation
+VTech,16,Curtain motor limit setting pending.,true,master,"(from Specimen, approved by VTech 2026-10-28) Limit set pending."
+VTech,17,New light programming pending.,true,master,"(from Specimen, approved by VTech 2026-10-28) New light programming pending."
+VTech,18,AC addressing pending.,true,master,"(from Specimen, approved by VTech 2026-10-28) AC addressing pending."
+Architect,1,Curtain opening position not confirmed.,true,master,Curtain Opening Position (owner was 'Architect / Client')
+Architect,2,Light looping not confirmed.,true,master,Light Looping (owner was 'Architect / Client')
+Architect,3,Scene requirements not confirmed.,true,master,Scenes Requirements (owner was 'Architect / Client')
+Client,1,Email ID for Crestron Home not provided.,true,master,Email ID For Crestron Home
+Client,2,Email ID for Alexa not provided.,true,master,Email ID For  Alexa
+Programmer,1,Remote app configuration pending.,true,master,Remote App Configration
+Programmer,2,Camera integration with Crestron Home pending.,true,master,Camera Integration with Crestron Hone
+Programmer,3,VDP/door lock configuration with Crestron Home pending.,true,master,VDP / Door lock Configration with Crestron Home
+Wallpaper Vendor,1,Wall finish not complete — blocks face reader/eKey installation.,true,master,"(from Specimen, approved by VTech 2026-10-28) Face reader / Ekey installation pending (wall not final)."
