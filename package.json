@@ -35,9 +35,6 @@
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },
-  "optionalDependencies": {
-    "@rolldown/binding-darwin-arm64": "^1.2.15"
-  },
   "private": true,
   "type": "module"
 }
