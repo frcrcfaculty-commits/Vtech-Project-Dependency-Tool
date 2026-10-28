@@ -408,25 +408,28 @@ export default function AdminPage() {
             </div>
 
             <div className="rounded-2xl border border-border bg-surface overflow-hidden shadow-xs">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+              <div className="w-full overflow-x-auto">
+                <table className="w-full table-fixed text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-surface-alt border-b border-border">
-                      <th className="p-3 font-bold text-text-secondary">Name</th>
-                      <th className="p-3 font-bold text-text-secondary">Email</th>
-                      <th className="p-3 font-bold text-text-secondary">Role</th>
-                      <th className="p-3 font-bold text-text-secondary">Status</th>
-                      <th className="p-3 font-bold text-text-secondary text-right">Action</th>
+                      <th className="p-2.5 sm:p-3 font-bold text-text-secondary w-5/12 sm:w-auto">User</th>
+                      <th className="hidden sm:table-cell sm:p-3 font-bold text-text-secondary">Email</th>
+                      <th className="p-2.5 sm:p-3 font-bold text-text-secondary w-2/12 sm:w-auto">Role</th>
+                      <th className="p-2.5 sm:p-3 font-bold text-text-secondary w-2/12 sm:w-auto">Status</th>
+                      <th className="p-2.5 sm:p-3 font-bold text-text-secondary text-right w-3/12 sm:w-auto">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
                     {users.map((u) => (
                       <tr key={u.id} className="hover:bg-surface-alt/50 transition-colors">
-                        <td className="p-3 font-semibold text-text-primary">{u.full_name}</td>
-                        <td className="p-3 text-text-secondary">{u.email}</td>
-                        <td className="p-3">
+                        <td className="p-2.5 sm:p-3">
+                          <p className="font-semibold text-text-primary truncate">{u.full_name}</p>
+                          <p className="text-[11px] text-text-secondary truncate sm:hidden">{u.email}</p>
+                        </td>
+                        <td className="hidden sm:table-cell sm:p-3 text-text-secondary truncate">{u.email}</td>
+                        <td className="p-2.5 sm:p-3">
                           <span
-                            className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-bold ${
+                            className={`inline-block rounded-md px-1.5 py-0.5 text-[10px] sm:text-[11px] font-bold ${
                               u.role === 'super_admin'
                                 ? 'bg-danger-light text-danger'
                                 : u.role === 'pm_lead'
@@ -437,9 +440,9 @@ export default function AdminPage() {
                             {u.role}
                           </span>
                         </td>
-                        <td className="p-3">
+                        <td className="p-2.5 sm:p-3">
                           <span
-                            className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                            className={`inline-block rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
                               u.active
                                 ? 'bg-success-light text-success'
                                 : 'bg-surface-alt text-text-muted'
@@ -448,7 +451,7 @@ export default function AdminPage() {
                             {u.active ? 'Active' : 'Inactive'}
                           </span>
                         </td>
-                        <td className="p-3 text-right">
+                        <td className="p-2.5 sm:p-3 text-right">
                           <button
                             type="button"
                             onClick={() => handleToggleUserActive(u)}
