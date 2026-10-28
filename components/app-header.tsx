@@ -39,7 +39,7 @@ export function AppHeader() {
         <div className="mx-auto flex max-w-4xl items-center justify-between">
           <div className="flex items-center gap-6">
             <Link
-              href="/"
+              href="/hub"
               className="text-lg font-bold tracking-tight text-text-primary hover:opacity-80 transition-opacity"
             >
               VTech
@@ -49,9 +49,19 @@ export function AppHeader() {
             {isAdmin && (
               <nav className="flex items-center gap-1">
                 <Link
-                  href="/"
+                  href="/hub"
                   className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                    pathname === '/' || pathname.startsWith('/projects')
+                    pathname === '/' || pathname === '/hub'
+                      ? 'bg-surface-alt text-text-primary font-semibold'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Hub
+                </Link>
+                <Link
+                  href="/projects"
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    pathname.startsWith('/projects')
                       ? 'bg-surface-alt text-text-primary font-semibold'
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
