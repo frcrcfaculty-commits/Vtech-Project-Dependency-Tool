@@ -28,5 +28,5 @@ export function formatEscalationLabel(
   const level = getEscalationLevel(reminderCount, l2After, l3After);
   if (level === 3) return 'L3 Escalation';
   if (level === 2) return 'L2 Escalation';
-  return 'L1 · First contact';
+  return 'L1 · First notice';
 }

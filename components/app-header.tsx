@@ -59,6 +59,16 @@ export function AppHeader() {
                   Hub
                 </Link>
                 <Link
+                  href="/pending"
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    pathname.startsWith('/pending')
+                      ? 'bg-surface-alt text-text-primary font-semibold'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Pending
+                </Link>
+                <Link
                   href="/projects"
                   className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                     pathname.startsWith('/projects')
