@@ -18,10 +18,12 @@ if (!DEMO_NAME.startsWith('Demo –')) throw new Error('demo project name must s
 
 const db = createClient(url, key, { auth: { persistSession: false } });
 
-function must<T>(res: { data: T | null; error: { message: string } | null }, what: string): T {
+// No generated DB types in this repo: callers state the row shape they selected.
+type Rec = Record<string, string>;
+function must<T = Rec[]>(res: { data: unknown; error: { message: string } | null }, what: string): T {
   if (res.error) throw new Error(`${what}: ${res.error.message}`);
   if (res.data === null) throw new Error(`${what}: no data`);
-  return res.data;
+  return res.data as T;
 }
 
 // ───────────── data (from the Specimen tab) ─────────────
@@ -133,10 +135,10 @@ const del = await db.from('projects').delete().eq('name', DEMO_NAME).select('id'
 if (del.error) throw new Error(`delete old demo: ${del.error.message}`);
 console.log(`deleted ${del.data.length} old demo project(s)`);
 
-const pm = must(await db.from('profiles').select('id').eq('email', DEMO_PM_EMAIL).single(), `PM ${DEMO_PM_EMAIL}`);
+const pm = must<Rec>(await db.from('profiles').select('id').eq('email', DEMO_PM_EMAIL).single(), `PM ${DEMO_PM_EMAIL}`);
 
 // 2. Project (created_by = PM, so the trigger makes the PM a member).
-const project = must(await db.from('projects').insert({
+const project = must<Rec>(await db.from('projects').insert({
   name: DEMO_NAME, client_name: 'Shah family (demo)', site_address: 'Demo site, 12th–14th floors, Mumbai',
   created_by: pm.id,
 }).select('id').single(), 'insert project');
@@ -165,7 +167,7 @@ const typeId = (name: string) => {
   return t.id as string;
 };
 for (const a of AGENCIES) {
-  const ag = must(await db.from('agencies').insert({ project_id: pid, agency_type_id: typeId(a.type), company_name: a.company })
+  const ag = must<Rec>(await db.from('agencies').insert({ project_id: pid, agency_type_id: typeId(a.type), company_name: a.company })
     .select('id').single(), `agency ${a.type}`);
   must(await db.from('agency_contacts').insert(a.contacts.map((c) => ({
     project_id: pid, agency_id: ag.id, name: c.name, designation: c.designation, level: c.level,
@@ -199,14 +201,16 @@ for (const [dep, rooms] of byDep) {
 const items = must(await db.from('dependency_items').select('id,room_id,project_dependency_id,agency_id').eq('project_id', pid), 'items');
 const unassigned = items.filter((i) => !i.agency_id).length;
 if (unassigned) throw new Error(`${unassigned} items have no agency`);
-const visit = must(await db.from('site_visits').insert({ project_id: pid, pm_id: pm.id, visit_date: visitDate })
+const visit = must<Rec>(await db.from('site_visits').insert({ project_id: pid, pm_id: pm.id, visit_date: visitDate })
   .select('id').single(), 'insert visit');
+const visitId = visit.id as string;
+const pmId = pm.id as string;
 must(await db.from('visit_checks').insert(ROWS.map(([floor, room, dep, note, status]) => {
   const item = items.find((i) => i.room_id === roomId(floor, room) && i.project_dependency_id === depId(dep));
   if (!item) throw new Error(`item missing: ${floor} – ${room} / ${dep}`);
-  return { project_id: pid, visit_id: visit.id, item_id: item.id, status, status_date: visitDate, note, checked_by: pm.id };
+  return { project_id: pid, visit_id: visitId, item_id: item.id, status, status_date: visitDate, note, checked_by: pmId };
 })).select('id'), 'visit checks');
-const n = must(await db.rpc('finalize_visit', { p_visit: visit.id }), 'finalize_visit');
+const n = must<number>(await db.rpc('finalize_visit', { p_visit: visitId }), 'finalize_visit');
 
 // 8. Summary.
 const { data: final } = await db.from('dependency_items').select('status').eq('project_id', pid);
