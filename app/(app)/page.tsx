@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
 import { supabaseBrowser } from '@/lib/client/supabase';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 interface ProjectSummary {
@@ -40,7 +39,6 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -184,11 +182,11 @@ export default function ProjectsPage() {
         ) : (
           <div className="space-y-3">
             {projects.map((p) => (
-              <div
+              <Link
                 key={p.id}
-                onClick={() => router.push(`/projects/${p.id}`)}
-                className="group relative cursor-pointer rounded-xl border border-border bg-surface p-4 shadow-xs
-                           hover:border-accent/40 active:bg-surface-alt transition-all"
+                href={`/projects/${p.id}`}
+                className="group relative block rounded-xl border border-border bg-surface p-4 shadow-xs
+                           hover:border-accent/40 active:bg-surface-alt transition-all focus:outline-none focus:ring-2 focus:ring-accent"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -247,7 +245,7 @@ export default function ProjectsPage() {
                     </svg>
                   </span>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}
