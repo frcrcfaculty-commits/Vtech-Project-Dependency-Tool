@@ -21,6 +21,10 @@ jobs:
       PGUSER: postgres
       PGPASSWORD: postgres
       NEXT_TELEMETRY_DISABLED: 1
+      # Client pages are prerendered at build time and construct a Supabase client; they need the public
+      # URL/key to exist (no network call happens at build). Placeholders, not real values.
+      NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
