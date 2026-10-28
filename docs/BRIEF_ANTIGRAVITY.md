@@ -13,8 +13,8 @@ Paste this file, docs/SPEC.md and docs/AGENTS.md into Antigravity as context. Wo
 
 ## Screens and acceptance checks
 
-**S1 Sign in** (`app/login`) — email + password; "Forgot password"; handle invite link (set password).
-- [ ] Invited user can set a password and lands on S2.
+**S1 Sign in** (`app/login`) — email + password; "Change password" in a profile menu (`supabase.auth.updateUser({ password })`). Accounts are created by admins with a temporary password (no invite emails — Supabase free tier allows only a few auth emails per hour).
+- [ ] A new user signs in with the temporary password, changes it, and lands on S2.
 
 **S2 Projects** (`app/(app)/page.tsx` — move the placeholder) — list of projects the user can see: name, client, pending count, escalated count, last visit (from `GET /api/dashboard`). "New project" button.
 - [ ] A PM sees only assigned projects; Vipul sees all.
@@ -47,7 +47,7 @@ Paste this file, docs/SPEC.md and docs/AGENTS.md into Antigravity as context. Wo
 - [ ] Every agency with pending items gets exactly one email and one WhatsApp draft.
 - [ ] After confirming, the item reminder counts increase by 1.
 
-**S7 Admin** (super_admin + pm_lead) — Users (invite via `POST /api/admin/users`, deactivate) · Project assignment (`project_members`) · Master list (edit text, activate/deactivate items, add new, see custom project items and "Promote" → `rpc('promote_dependency')`).
+**S7 Admin** (super_admin + pm_lead) — Users (create via `POST /api/admin/users` → show the returned `temporaryPassword` once with a copy button; deactivate) · Project assignment (`project_members`) · Master list (edit text, activate/deactivate items, add new, see custom project items and "Promote" → `rpc('promote_dependency')`).
 - [ ] PM lead cannot see the "super admin" role option.
 
 **S8 Dashboard** (super_admin) — portfolio table from `GET /api/dashboard`, sorted by escalated then pending.

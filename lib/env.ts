@@ -9,7 +9,6 @@ function req(name: string): string {
 export const env = {
   supabaseUrl: () => req('NEXT_PUBLIC_SUPABASE_URL'),
   supabaseAnonKey: () => req('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
-  supabaseServiceKey: () => req('SUPABASE_SERVICE_ROLE_KEY'),
 
   emailMode: () => (process.env.EMAIL_MODE ?? 'compose_link') as 'compose_link' | 'gmail_api' | 'dryrun',
   googleServiceAccountJson: () => req('GOOGLE_SERVICE_ACCOUNT_JSON'),

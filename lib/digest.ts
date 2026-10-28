@@ -2,7 +2,7 @@
 
 import { levelForReminder } from './escalation';
 import { daysOpen, formatDate } from './report';
-import { supabaseAdmin } from './supabase/server';
+import { supabaseAnon } from './supabase/server';
 
 export interface DigestItem { projectId: string; agency: string; status: string; firstRaisedOn: string | null; completedOn: string | null; reminderCount: number }
 export interface DigestProject { id: string; name: string; l2After: number; l3After: number; lastVisit: string | null }
@@ -47,33 +47,8 @@ export function buildDigest(projects: DigestProject[], items: DigestItem[], asOf
   return { subject: `VTech weekly: ${sections.reduce((n, s) => n + s.pending, 0)} pending across ${sections.length} projects`, text, html, sections };
 }
 
-export async function loadDigestRows() {
-  const db = supabaseAdmin();
-  const { data: projects, error } = await db.from('projects').select('id, name, l2_after, l3_after').eq('status', 'active');
-  if (error) throw error;
-  const ids = (projects ?? []).map((p) => p.id);
-  if (!ids.length) return { projects: [], items: [] };
-  const [{ data: items }, { data: visits }, { data: recipients }] = await Promise.all([
-    db.from('dependency_items').select('project_id, status, first_raised_on, completed_on, reminder_count, agencies(company_name, agency_types(name))')
-      .in('project_id', ids).in('status', ['pending', 'complete']),
-    db.from('site_visits').select('project_id, visit_date').in('project_id', ids).order('visit_date', { ascending: false }),
-    db.from('profiles').select('full_name, email').eq('role', 'super_admin').eq('active', true),
-  ]);
-  const lastVisit = new Map<string, string>();
-  for (const v of visits ?? []) if (!lastVisit.has(v.project_id)) lastVisit.set(v.project_id, v.visit_date);
-  type Ag = { company_name: string; agency_types: { name: string } | { name: string }[] } | null;
-  const agencyName = (a: Ag | Ag[]) => {
-    const x = Array.isArray(a) ? a[0] : a;
-    if (!x) return 'Unassigned';
-    const t = Array.isArray(x.agency_types) ? x.agency_types[0] : x.agency_types;
-    return `${t?.name ?? ''} – ${x.company_name}`;
-  };
-  return {
-    projects: (projects ?? []).map((p) => ({ id: p.id, name: p.name, l2After: p.l2_after, l3After: p.l3_after, lastVisit: lastVisit.get(p.id) ?? null })),
-    items: (items ?? []).map((i) => ({
-      projectId: i.project_id, agency: agencyName(i.agencies as unknown as Ag | Ag[]), status: i.status,
-      firstRaisedOn: i.first_raised_on, completedOn: i.completed_on, reminderCount: i.reminder_count,
-    })),
-    recipients: (recipients ?? []).map((r) => ({ name: r.full_name, email: r.email })),
-  };
+export async function loadDigestRows(cronSecret: string): Promise<{ projects: DigestProject[]; items: DigestItem[]; recipients: { name: string; email: string }[] }> {
+  const { data, error } = await supabaseAnon().rpc('cron_digest_data', { p_secret: cronSecret });
+  if (error) throw new Error(error.message);
+  return data as { projects: DigestProject[]; items: DigestItem[]; recipients: { name: string; email: string }[] };
 }

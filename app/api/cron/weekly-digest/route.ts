@@ -8,9 +8,9 @@ export async function GET(req: Request) {
     return Response.json({ error: 'unauthorized' }, { status: 401 });
   }
   const asOf = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
-  const rows = await loadDigestRows();
+  const rows = await loadDigestRows(env.cronSecret());
   const digest = buildDigest(rows.projects, rows.items, asOf);
-  const to = rows.recipients ?? [];
+  const to = rows.recipients;
 
   if (env.emailMode() !== 'gmail_api' || !to.length) {
     console.log('[weekly-digest] not emailed (mode or no recipients)\n' + digest.text);

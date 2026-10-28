@@ -8,7 +8,7 @@ import { buildAgencyReport, type Person, type ReportItem } from './report';
 import { gmailComposeUrl, sendViaGmailApi, type OutgoingEmail } from './channels/email';
 import { sendMetaTemplate, waLink } from './channels/whatsapp';
 import { env } from './env';
-import { supabaseAdmin, type Db } from './supabase/server';
+import type { Db } from './supabase/server';
 
 type One<T> = T | T[] | null;
 const one = <T,>(v: One<T>): T => (Array.isArray(v) ? v[0] : v) as T;
@@ -45,8 +45,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string): Promis
   ]);
   if (!project) throw new HttpError(404, 'Project not found');
 
-  const { data: mgmt } = await supabaseAdmin().from('profiles')
-    .select('full_name, email').eq('role', 'super_admin').eq('active', true);
+  const { data: mgmt } = await db.rpc('management_contacts');
 
   const { data: existing } = await db.from('dispatches').select('agency_id, channel, status').eq('visit_id', visitId);
   const alreadySent = new Set((existing ?? []).filter((d) => d.status === 'sent').map((d) => `${d.agency_id}:${d.channel}`));
@@ -79,7 +78,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string): Promis
       visitDate: visit.visit_date,
       agency: { companyName: a.company_name, typeName, escalationEnabled: a.escalation_enabled, contacts },
       pm: { name: me.fullName, email: me.email, phone: me.phone },
-      management: (mgmt ?? []).map((m) => ({ name: m.full_name, email: m.email })),
+      management: ((mgmt ?? []) as { full_name: string; email: string }[]).map((m) => ({ name: m.full_name, email: m.email })),
       items: list,
     });
     warnings.push(...report.warnings);

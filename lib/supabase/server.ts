@@ -16,9 +16,9 @@ export async function supabaseForUser() {
   });
 }
 
-/** Service-role client. Bypasses RLS — server only, never import from client code. */
-export function supabaseAdmin() {
-  return createClient(env.supabaseUrl(), env.supabaseServiceKey(), { auth: { persistSession: false } });
+/** Anonymous client with no session — only for secret-gated RPCs (cron). The app never uses the service-role key. */
+export function supabaseAnon() {
+  return createClient(env.supabaseUrl(), env.supabaseAnonKey(), { auth: { persistSession: false } });
 }
 
-export type Db = Awaited<ReturnType<typeof supabaseForUser>> | ReturnType<typeof supabaseAdmin>;
+export type Db = Awaited<ReturnType<typeof supabaseForUser>>;

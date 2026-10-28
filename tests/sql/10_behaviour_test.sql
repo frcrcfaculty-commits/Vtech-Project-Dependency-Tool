@@ -2,7 +2,7 @@
 \set ON_ERROR_STOP on
 
 -- users: Vipul (super_admin), lead (pm_lead), pm1 (member), pm2 (outsider)
-insert into auth.users values
+insert into auth.users (id, email) values
  ('00000000-0000-0000-0000-000000000001','vipul@vtechpl.com'),
  ('00000000-0000-0000-0000-000000000002','lead@vtechpl.com'),
  ('00000000-0000-0000-0000-000000000003','pm1@vtechpl.com'),
@@ -27,7 +27,8 @@ select pg_temp.assert((select count(*) from public.master_dependencies where not
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 set role authenticated;
 
-insert into public.projects (name, client_name) values ('Shah Residence', 'Mr Shah');
+-- the app always inserts with RETURNING; the creator must see the row immediately
+insert into public.projects (name, client_name) values ('Shah Residence', 'Mr Shah') returning id;
 select pg_temp.assert((select count(*) from public.projects) = 1, 'creator sees own project');
 select pg_temp.assert((select terms from public.projects) like 'General terms%', 'project terms default from settings');
 
@@ -180,6 +181,54 @@ reset role;
 -- anon sees nothing
 set role anon;
 select pg_temp.assert((select count(*) from public.master_dependencies) = 0, 'anon cannot read master list');
+reset role;
+
+-- ── 0003/0004: user creation, management contacts, cron digest ──
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+set role authenticated;
+select pg_temp.assert(public.create_app_user('newpm@vtechpl.com','New PM','pm','Secret123!') is not null, 'PM lead creates a PM login');
+do $$ begin
+  perform public.create_app_user('x@vtechpl.com','X','super_admin','Secret123!');
+  raise exception 'should have failed';
+exception when others then if sqlerrm not like 'PM lead can only%' then raise; end if; raise notice 'ok - PM lead cannot create super admin';
+end $$;
+do $$ begin
+  perform public.create_app_user('newpm@vtechpl.com','Dup','pm','Secret123!');
+  raise exception 'should have failed';
+exception when others then if sqlerrm not like 'user already exists%' then raise; end if; raise notice 'ok - duplicate email rejected';
+end $$;
+select pg_temp.assert((select count(*) from public.management_contacts()) = 1, 'management_contacts returns active super admins');
+do $$ begin
+  perform public.admin_create_user('y@vtechpl.com','pw123456','Y','super_admin');
+  raise exception 'should have failed';
+exception when insufficient_privilege then raise notice 'ok - app users cannot call admin_create_user directly';
+end $$;
+reset role;
+select pg_temp.assert((select encrypted_password like '$2%' and email_confirmed_at is not null from auth.users where email='newpm@vtechpl.com'), 'new login has bcrypt password and is confirmed');
+select pg_temp.assert((select count(*) from auth.identities i join auth.users u on u.id=i.user_id where u.email='newpm@vtechpl.com') = 1, 'new login has an email identity');
+
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+set role authenticated;
+do $$ begin
+  perform public.create_app_user('z@vtechpl.com','Z','pm','Secret123!');
+  raise exception 'should have failed';
+exception when others then if sqlerrm not like 'not allowed%' then raise; end if; raise notice 'ok - PM cannot create users';
+end $$;
+reset role;
+
+insert into public.app_secrets values ('cron_secret', 's3cret');
+set role anon;
+do $$ begin
+  perform public.cron_digest_data('wrong');
+  raise exception 'should have failed';
+exception when others then if sqlerrm <> 'unauthorized' then raise; end if; raise notice 'ok - cron digest rejects wrong secret';
+end $$;
+select pg_temp.assert(jsonb_array_length(public.cron_digest_data('s3cret')->'projects') = 1, 'cron digest returns data with right secret');
+do $$ begin
+  perform * from public.app_secrets;
+  raise exception 'should have failed';
+exception when insufficient_privilege then raise notice 'ok - anon cannot read app_secrets';
+end $$;
 reset role;
 
 \echo ALL SQL TESTS PASSED
