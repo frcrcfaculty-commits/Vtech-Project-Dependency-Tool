@@ -105,28 +105,58 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
       `${pm.name}`,
       `VTech Technologies${pm.phone ? ` | ${pm.phone}` : ''}`,
     ];
+    // Email-client-safe HTML: table layout, inline styles, bgcolor attributes (Outlook ignores CSS backgrounds
+    // on some elements), system fonts only, no <style>, no web fonts, no images except the optional logo.
+    const logoUrl = process.env.NEXT_PUBLIC_LOGO_URL;
+    const F = 'font-family:Arial,Helvetica,sans-serif';
+    const td = `${F};padding:8px 6px;border-bottom:1px solid #e4e7ec;font-size:13px;line-height:18px;vertical-align:top`;
+    const th = `${F};padding:8px 6px;font-size:12px;line-height:16px;font-weight:bold;color:#475467;text-align:left;border-bottom:2px solid #d0d5dd`;
+    const accent = level >= 2 ? '#b42318' : '#1d4ed8';
     const rows = withLevels.map((i, n) => `
-      <tr>
-        <td style="padding:6px 8px;border-bottom:1px solid #e5e5e5;color:#666">${n + 1}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #e5e5e5">${esc(location(i))}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #e5e5e5">${esc(i.text)}${i.note ? `<br><span style="color:#666;font-size:12px">${esc(i.note)}</span>` : ''}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #e5e5e5;white-space:nowrap">${formatDate(i.firstRaisedOn)}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #e5e5e5;text-align:center${i.level >= 2 ? ';color:#b42318;font-weight:600' : ''}">${i.reminderNo}</td>
-      </tr>`).join('');
-    const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1a1a1a;max-width:760px">
-  <p>Dear ${esc(er.to.map((c) => c.name).join(', '))},</p>
-  <p>At our site visit on <b>${formatDate(visitDate)}</b> at <b>${esc(project.name)}</b>${project.clientName ? ` (${esc(project.clientName)})` : ''},
-     the following ${esc(agency.typeName.toLowerCase())} items were found pending. Please complete them at the earliest.</p>
-  ${level >= 2 ? `<p style="color:#b42318"><b>This is an escalation (level ${level}).</b> Some items have remained pending across multiple reminders.</p>` : ''}
-  <table style="border-collapse:collapse;width:100%;font-size:13px">
-    <thead><tr style="background:#f4f4f4;text-align:left">
-      <th style="padding:6px 8px">#</th><th style="padding:6px 8px">Location</th><th style="padding:6px 8px">Pending item</th>
-      <th style="padding:6px 8px">First raised</th><th style="padding:6px 8px">Reminder</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>
-  <p style="white-space:pre-line;color:#444;font-size:12px;margin-top:20px">${esc(project.terms)}</p>
-  <p>Regards,<br>${esc(pm.name)}<br>VTech Technologies${pm.phone ? ` | ${esc(pm.phone)}` : ''}</p>
-</div>`;
+            <tr>
+              <td width="22" style="${td};color:#667085">${n + 1}</td>
+              <td width="30%" style="${td};color:#1a1a1a">${esc(location(i))}</td>
+              <td style="${td};color:#1a1a1a">${esc(i.text)}${i.note ? `<br><span style="${F};color:#667085;font-size:12px;line-height:16px">${esc(i.note)}</span>` : ''}</td>
+              <td width="92" style="${td};color:#1a1a1a;white-space:nowrap">${formatDate(i.firstRaisedOn)}<br><span style="${F};font-size:12px;line-height:16px;${i.level >= 2 ? 'color:#b42318;font-weight:bold' : 'color:#667085'}">Reminder #${i.reminderNo}</span></td>
+            </tr>`).join('');
+    const html = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f2f4f7" style="background-color:#f2f4f7;border-collapse:collapse">
+  <tr><td align="center" style="padding:16px 4px">
+    <table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:680px;background-color:#ffffff;border-collapse:collapse;border:1px solid #e4e7ec">
+      <tr><td bgcolor="${accent}" style="background-color:${accent};height:4px;line-height:4px;font-size:4px">&nbsp;</td></tr>
+      <tr><td style="padding:16px 16px 6px 16px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+          <tr>
+            ${logoUrl ? `<td width="140" valign="middle" style="padding-right:12px"><img src="${esc(logoUrl)}" alt="VTech Technologies" width="120" style="display:block;border:0;outline:none;width:120px;height:auto"></td>` : ''}
+            <td valign="middle" style="${F};font-size:12px;line-height:16px;color:#667085">VTech Technologies · Site dependency report</td>
+          </tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding:6px 16px 0 16px;${F};font-size:20px;line-height:26px;font-weight:bold;color:#101828">${esc(project.name)}</td></tr>
+      <tr><td style="padding:2px 16px 14px 16px;${F};font-size:13px;line-height:18px;color:#475467">${esc(agency.typeName)} · ${esc(agency.companyName)}<br>${withLevels.length} pending item${withLevels.length === 1 ? '' : 's'} · site visit ${formatDate(visitDate)}</td></tr>
+      ${level >= 2 ? `<tr><td style="padding:0 16px 14px 16px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+          <tr><td bgcolor="#fef3f2" style="background-color:#fef3f2;border-left:4px solid #b42318;padding:10px 12px;${F};font-size:13px;line-height:18px;color:#b42318"><b>This is an escalation (level ${level}).</b> Some items have remained pending across multiple reminders.</td></tr>
+        </table>
+      </td></tr>` : ''}
+      <tr><td style="padding:0 16px 12px 16px;${F};font-size:14px;line-height:20px;color:#1a1a1a">
+        <p style="margin:0 0 10px 0">Dear ${esc(er.to.map((c) => c.name).join(', '))},</p>
+        <p style="margin:0">At our site visit on <b>${formatDate(visitDate)}</b> at <b>${esc(project.name)}</b>${project.clientName ? ` (${esc(project.clientName)})` : ''},
+          the following ${esc(agency.typeName.toLowerCase())} items were found pending. Please complete them at the earliest.</p>
+      </td></tr>
+      <tr><td style="padding:0 10px 8px 10px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+          <thead><tr bgcolor="#f9fafb" style="background-color:#f9fafb">
+            <th style="${th}">#</th><th style="${th}">Location</th><th style="${th}">Pending item</th>
+            <th style="${th};white-space:nowrap">First raised</th></tr></thead>
+          <tbody>${rows}
+          </tbody>
+        </table>
+      </td></tr>
+      <tr><td style="padding:12px 16px 0 16px;${F};font-size:12px;line-height:17px;color:#344054;white-space:pre-line">${esc(project.terms)}</td></tr>
+      <tr><td style="padding:16px 16px 22px 16px;${F};font-size:14px;line-height:20px;color:#1a1a1a">Regards,<br><b>${esc(pm.name)}</b><br>VTech Technologies${pm.phone ? ` | ${esc(pm.phone)}` : ''}</td></tr>
+    </table>
+  </td></tr>
+</table>`;
     email = {
       to: er.to.map((c) => ({ name: c.name, email: c.email! })),
       cc,
