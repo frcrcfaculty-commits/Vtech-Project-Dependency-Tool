@@ -1,12 +1,13 @@
+import { randomBytes } from 'node:crypto';
 import { handle, json, requireUser, HttpError } from '@/lib/auth';
-import { supabaseAdmin } from '@/lib/supabase/server';
 
-// POST {email, fullName, phone?, role} — super_admin creates any role; pm_lead creates PMs only.
-// The new user gets an invite email (Supabase Auth) to set their password.
+// POST {email, fullName, phone?, role, password?}
+// super_admin creates any role; pm_lead creates PMs only (enforced again in the database function).
+// If no password is given, a temporary one is generated and returned once so the admin can share it.
 export async function POST(req: Request) {
   return handle(async () => {
-    const { me } = await requireUser();
-    const body = (await req.json()) as { email?: string; fullName?: string; phone?: string; role?: string };
+    const { db, me } = await requireUser();
+    const body = (await req.json()) as { email?: string; fullName?: string; phone?: string; role?: string; password?: string };
     const email = body.email?.trim().toLowerCase();
     const fullName = body.fullName?.trim();
     const role = body.role ?? 'pm';
@@ -15,12 +16,11 @@ export async function POST(req: Request) {
     if (me.role === 'pm') throw new HttpError(403, 'PMs cannot create users');
     if (me.role === 'pm_lead' && role !== 'pm') throw new HttpError(403, 'PM lead can only create PM accounts');
 
-    const admin = supabaseAdmin();
-    const origin = new URL(req.url).origin;
-    const { data, error } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo: `${origin}/login` });
-    if (error || !data.user) throw new HttpError(400, error?.message ?? 'invite failed');
-    const { error: pErr } = await admin.from('profiles').insert({ id: data.user.id, email, full_name: fullName, phone: body.phone ?? null, role });
-    if (pErr) throw new HttpError(400, pErr.message);
-    return json({ id: data.user.id, email, role }, 201);
+    const password = body.password ?? `Vt-${randomBytes(6).toString('base64url')}`;
+    const { data: id, error } = await db.rpc('create_app_user', {
+      p_email: email, p_full_name: fullName, p_role: role, p_password: password, p_phone: body.phone ?? null,
+    });
+    if (error) throw new HttpError(400, error.message);
+    return json({ id, email, role, temporaryPassword: body.password ? undefined : password }, 201);
   });
 }

@@ -58,12 +58,13 @@ Mondays 08:00 IST to all super admins: per project pending, escalated (L2+), clo
 
 ## 5. Architecture
 Next.js 16 (App Router) on Vercel (region bom1) · Supabase Postgres + Auth + Storage · RLS enforces access in the database.
+The deployed app holds **no service-role key**: user creation (`create_app_user`), the management CC list (`management_contacts`) and the cron digest (`cron_digest_data`, gated by a secret in `app_secrets`) are narrow SECURITY DEFINER functions.
 ```
 app/api/visits/[id]/finalize      POST  apply checks → build drafts
 app/api/visits/[id]/dispatches    GET list · POST rebuild drafts
 app/api/dispatches/[id]/send      POST  send, or return links (link modes)
 app/api/dispatches/[id]/confirm   POST  PM confirms a link-mode send
-app/api/admin/users               POST  invite user (role rules enforced)
+app/api/admin/users               POST  create login, returns a temporary password (role rules enforced in DB)
 app/api/dashboard                 GET   portfolio summary
 app/api/cron/weekly-digest        GET   Vercel cron
 ```
