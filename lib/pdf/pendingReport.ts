@@ -53,7 +53,7 @@ export function groupRows(rows: PdfRow[]) {
 
 // ───────────── text runs: pick a font per script ─────────────
 const isIndic = (cp: number) => (cp >= 0x0900 && cp <= 0x097f) || (cp >= 0xa8e0 && cp <= 0xa8ff) || (cp >= 0x1cd0 && cp <= 0x1cff);
-interface Face { latin: PDFFont; deva: PDFFont }
+export interface Face { latin: PDFFont; deva: PDFFont }
 type Run = { text: string; font: PDFFont };
 
 function runs(text: string, face: Face): Run[] {
@@ -74,15 +74,15 @@ function sanitize(text: string, face: Face): string {
   let s = '';
   for (const ch of text.replace(/[\r\t]/g, ' ')) {
     const cp = ch.codePointAt(0)!;
-    if (cp < 0x20) continue;
-    s += latinSet.has(cp) || devaSet.has(cp) || cp === 0x200c || cp === 0x200d ? ch : '?';
+    if (cp < 0x20 && ch !== '\n') continue;
+    s += cp === 0x0a || latinSet.has(cp) || devaSet.has(cp) || cp === 0x200c || cp === 0x200d ? ch : '?';
   }
   return s;
 }
 
 const width = (t: string, face: Face, size: number) => runs(t, face).reduce((w, r) => w + r.font.widthOfTextAtSize(r.text, size), 0);
 
-function wrap(text: string, face: Face, size: number, max: number): string[] {
+export function wrap(text: string, face: Face, size: number, max: number): string[] {
   const lines: string[] = [];
   for (const para of sanitize(text, face).split('\n')) {
     let line = '';
@@ -117,11 +117,11 @@ const LH = 11;             // body line height
 const PAD = 4;
 const COLS = [
   { key: 'no', title: 'No', w: 26 },
-  { key: 'room', title: 'Room', w: 140 },
+  { key: 'room', title: 'Room', w: 130 },
   { key: 'agency', title: 'Agency', w: 82 },
-  { key: 'dep', title: 'Dependency', w: 176 },
+  { key: 'dep', title: 'Dependency', w: 170 },
   { key: 'first', title: 'First raised', w: 61 },
-  { key: 'rem', title: 'Reminder #', w: 38.28 },
+  { key: 'rem', title: 'Reminder #', w: 54.28 },
 ] as const;
 const GREY = rgb(0.4, 0.42, 0.46);
 const LINE = rgb(0.86, 0.87, 0.9);

@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
-import { buildPendingPdf, formatDate, groupRows, roomLabel, type PdfFonts, type PdfRow } from './pendingReport';
+import { buildPendingPdf, formatDate, groupRows, roomLabel, wrap, type PdfFonts, type PdfRow } from './pendingReport';
 
 const dir = path.join(__dirname, 'fonts');
 const fonts: PdfFonts = {
@@ -46,6 +47,13 @@ describe('pending-items PDF', () => {
       row(3, { company: 'श्री गणेश इलेक्ट्रिकल्स' }),
     ]), fonts);
     expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
+  });
+
+  it('keeps the note on its own line (newline survives sanitising)', async () => {
+    const doc = await PDFDocument.create();
+    doc.registerFontkit(fontkit);
+    const face = { latin: await doc.embedFont(fonts.latin), deva: await doc.embedFont(fonts.deva) };
+    expect(wrap('Face reader pending.\nWall not final.', face, 8.5, 500)).toEqual(['Face reader pending.', 'Wall not final.']);
   });
 
   it('empty project still renders', async () => {
