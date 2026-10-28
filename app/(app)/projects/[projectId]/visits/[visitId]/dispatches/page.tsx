@@ -312,7 +312,7 @@ export default function ReviewSendPage({
                               : 'bg-surface-alt text-text-secondary'
                           }`}
                         >
-                          L{d.level} Escalation
+                          {d.level === 1 ? 'L1 · First contact' : `L${d.level} Escalation`}
                         </span>
 
                         <span className="text-xs text-text-muted">
