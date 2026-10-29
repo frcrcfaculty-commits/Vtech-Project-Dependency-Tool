@@ -123,11 +123,13 @@ export default function PendingPage() {
         sb
           .from('dependency_items')
           .select(
+            // Embed by table name, not column hint: dependency_items' FKs are composite (col, project_id), and
+            // PostgREST cannot resolve `alias:column(...)` hints for composite keys (PGRST200). The project is
+            // reached through rooms → floors → projects and lifted to `projects` below to keep the PendingItem shape.
             `id, project_id, room_id, agency_id, status, first_raised_on, completed_on, reminder_count, last_reminded_on, note, photo_path, updated_at,
-             projects:project_id(id, name, client_name, l2_after, l3_after),
-             rooms:room_id(id, name, floors:floor_id(id, label)),
-             project_dependencies:project_dependency_id(id, text, agency_types:agency_type_id(id, name)),
-             agencies:agency_id(id, company_name, agency_types:agency_type_id(id, name))`
+             rooms(id, name, floors(id, label, projects(id, name, client_name, l2_after, l3_after))),
+             project_dependencies(id, text, agency_types(id, name)),
+             agencies(id, company_name, agency_types(id, name))`
           )
           .eq('status', 'pending')
           .order('first_raised_on', { ascending: true, nullsFirst: false }),
@@ -142,7 +144,13 @@ export default function PendingPage() {
       if (contactsRes.error) throw contactsRes.error;
 
       // Type-safe cast of nested Supabase data
-      const rawItems = (itemsRes.data ?? []) as unknown as PendingItem[];
+      type Raw = Omit<PendingItem, 'projects'> & {
+        rooms: (PendingItem['rooms'] & { floors: { id: string; label: string; projects: PendingItem['projects'] } | null }) | null;
+      };
+      const rawItems: PendingItem[] = ((itemsRes.data ?? []) as unknown as Raw[]).map((r) => ({
+        ...r,
+        projects: r.rooms?.floors?.projects ?? null,
+      }));
       setItems(rawItems);
       setContacts((contactsRes.data ?? []) as AgencyContact[]);
     } catch (err) {
