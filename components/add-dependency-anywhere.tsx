@@ -97,7 +97,7 @@ export function AddDependencyAnywhere() {
       const sb = supabaseBrowser();
 
       const [projRes, typeRes, masterRes] = await Promise.all([
-        sb.from('projects').select('id, name').order('name'),
+        sb.from('projects').select('id, name').neq('status', 'closed').order('name'),
         sb.from('agency_types').select('id, name').order('sort'),
         sb.from('master_dependencies').select('id, agency_type_id, text, origin, active').eq('active', true).order('seq'),
       ]);
@@ -204,6 +204,15 @@ export function AddDependencyAnywhere() {
     checkRoomDeps();
   }, [isOpen, selectedRoomId]);
 
+  // Handle project change: immediately reset room and block save until new rooms finish loading
+  const handleProjectChange = (newProjectId: string) => {
+    setSelectedProjectId(newProjectId);
+    setSelectedRoomId(''); // immediately reset room selection
+    setRooms([]); // immediately clear old rooms so stale room cannot be saved
+    setLoadingRooms(true); // immediately lock save
+    setExistingRoomDepTexts(new Set());
+  };
+
   // Open modal handler
   const handleOpenModal = () => {
     setIsOpen(true);
@@ -268,8 +277,8 @@ export function AddDependencyAnywhere() {
 
   // Save handler
   const handleSaveDependencies = async () => {
-    if (!selectedRoomId) {
-      setError('Please select a room.');
+    if (loadingRooms || !selectedRoomId) {
+      setError('Please wait for rooms to load and select a room.');
       return;
     }
 
@@ -392,8 +401,8 @@ export function AddDependencyAnywhere() {
                   </label>
                   <select
                     value={selectedProjectId}
-                    onChange={(e) => setSelectedProjectId(e.target.value)}
-                    disabled={loadingInitial}
+                    onChange={(e) => handleProjectChange(e.target.value)}
+                    disabled={loadingInitial || saving}
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary focus:border-accent focus:outline-none"
                   >
                     {projects.map((p) => (
@@ -622,11 +631,16 @@ export function AddDependencyAnywhere() {
                 </button>
                 <button
                   type="button"
-                  disabled={saving || (selectedMasterIds.size === 0 && customEntries.length === 0)}
+                  disabled={
+                    saving ||
+                    loadingRooms ||
+                    !selectedRoomId ||
+                    (selectedMasterIds.size === 0 && customEntries.length === 0)
+                  }
                   onClick={handleSaveDependencies}
                   className="rounded-lg bg-accent px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-accent-hover transition-colors disabled:opacity-50"
                 >
-                  {saving ? 'Adding…' : 'Save Dependencies'}
+                  {saving ? 'Adding…' : loadingRooms ? 'Loading rooms…' : 'Save Dependencies'}
                 </button>
               </div>
             </div>

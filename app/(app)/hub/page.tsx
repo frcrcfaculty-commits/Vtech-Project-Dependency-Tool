@@ -14,6 +14,7 @@ interface ProjectTile {
   name: string;
   client_name: string | null;
   site_address: string | null;
+  status: 'active' | 'on_hold' | 'closed';
   l2_after: number;
   l3_after: number;
   updated_at: string;
@@ -136,8 +137,18 @@ function HubContent() {
   // Sending reminders state
   const [sendingReminders, setSendingReminders] = useState(false);
 
+  // Close / Reopen project status update state
+  const [updatingProjectStatus, setUpdatingProjectStatus] = useState(false);
+
+  // Show closed projects toggle (default false: closed projects hidden)
+  const [showClosed, setShowClosed] = useState(false);
+
   // Preview Photo Modal
   const [viewingPhotoUrl, setViewingPhotoUrl] = useState<string | null>(null);
+
+  const displayedProjects = useMemo(() => {
+    return showClosed ? projects : projects.filter((p) => p.status !== 'closed');
+  }, [projects, showClosed]);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId),
@@ -154,8 +165,7 @@ function HubContent() {
       const [{ data: dbProjects, error: pErr }, { data: allItems, error: iErr }] = await Promise.all([
         sb
           .from('projects')
-          .select('id, name, client_name, site_address, l2_after, l3_after, updated_at')
-          .neq('status', 'closed')
+          .select('id, name, client_name, site_address, status, l2_after, l3_after, updated_at')
           .order('name'),
         sb.from('dependency_items').select('project_id, status, reminder_count'),
       ]);
@@ -184,6 +194,7 @@ function HubContent() {
           name: string;
           client_name: string | null;
           site_address: string | null;
+          status: string | null;
           l2_after: number | null;
           l3_after: number | null;
           updated_at: string;
@@ -194,6 +205,7 @@ function HubContent() {
             name: p.name,
             client_name: p.client_name,
             site_address: p.site_address,
+            status: (p.status as 'active' | 'on_hold' | 'closed') ?? 'active',
             l2_after: p.l2_after ?? 3,
             l3_after: p.l3_after ?? 6,
             updated_at: p.updated_at,
@@ -209,10 +221,16 @@ function HubContent() {
       tiles.sort((a, b) => b.escalatedCount - a.escalatedCount || b.pendingCount - a.pendingCount || a.name.localeCompare(b.name));
       setProjects(tiles);
 
-      // Determine selected project from URL or first project
+      // Determine selected project from URL or first active project
       const queryP = searchParams.get('p');
+      const activeTiles = tiles.filter((t) => t.status !== 'closed');
       if (queryP && tiles.some((t) => t.id === queryP)) {
         setSelectedProjectId(queryP);
+        if (tiles.find((t) => t.id === queryP)?.status === 'closed') {
+          setShowClosed(true);
+        }
+      } else if (activeTiles.length > 0) {
+        setSelectedProjectId(activeTiles[0].id);
       } else if (tiles.length > 0) {
         setSelectedProjectId(tiles[0].id);
       }
@@ -502,6 +520,73 @@ function HubContent() {
     }
   };
 
+  // Close Project handler (sets projects.status = 'closed')
+  const handleCloseProject = async () => {
+    if (!selectedProjectId || !selectedProject) return;
+    if (!confirm(`Are you sure you want to close "${selectedProject.name}"? It will be hidden from the active Hub dashboard.`)) {
+      return;
+    }
+
+    try {
+      setUpdatingProjectStatus(true);
+      setError(null);
+      const sb = supabaseBrowser();
+      const { error: updErr } = await sb
+        .from('projects')
+        .update({ status: 'closed' })
+        .eq('id', selectedProjectId);
+
+      if (updErr) throw updErr;
+
+      setProjects((prev) =>
+        prev.map((p) => (p.id === selectedProjectId ? { ...p, status: 'closed' } : p))
+      );
+      setNotice(`Project "${selectedProject.name}" closed.`);
+      setTimeout(() => setNotice(null), 3000);
+
+      // If closed projects are hidden, switch to another active project
+      if (!showClosed) {
+        const remaining = projects.filter((p) => p.id !== selectedProjectId && p.status !== 'closed');
+        if (remaining.length > 0) {
+          setSelectedProjectId(remaining[0].id);
+        } else {
+          setSelectedProjectId('');
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to close project');
+    } finally {
+      setUpdatingProjectStatus(false);
+    }
+  };
+
+  // Reopen Project handler (sets projects.status = 'active')
+  const handleReopenProject = async () => {
+    if (!selectedProjectId || !selectedProject) return;
+
+    try {
+      setUpdatingProjectStatus(true);
+      setError(null);
+      const sb = supabaseBrowser();
+      const { error: updErr } = await sb
+        .from('projects')
+        .update({ status: 'active' })
+        .eq('id', selectedProjectId);
+
+      if (updErr) throw updErr;
+
+      setProjects((prev) =>
+        prev.map((p) => (p.id === selectedProjectId ? { ...p, status: 'active' } : p))
+      );
+      setNotice(`Project "${selectedProject.name}" reopened.`);
+      setTimeout(() => setNotice(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reopen project');
+    } finally {
+      setUpdatingProjectStatus(false);
+    }
+  };
+
   // Filtered dependency items
   const filteredItems = useMemo(() => {
     const l2 = selectedProject?.l2_after ?? 3;
@@ -563,42 +648,62 @@ function HubContent() {
 
         {/* ───────────────────────── SECTION 1: TOP PROJECT TILES ───────────────────────── */}
         <div>
-          <div className="flex items-center justify-between mb-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
             <div>
               <h1 className="text-xl font-bold tracking-tight text-text-primary">Office Hub</h1>
               <p className="text-xs text-text-secondary mt-0.5">
                 Central tracking dashboard for VTech Project Lead. Select a project to manage dependencies.
               </p>
             </div>
-            <Link
-              href="/projects/new"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors"
-            >
-              + New Project
-            </Link>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 cursor-pointer text-xs text-text-secondary hover:text-text-primary">
+                <input
+                  type="checkbox"
+                  checked={showClosed}
+                  onChange={(e) => setShowClosed(e.target.checked)}
+                  className="rounded border-border text-accent focus:ring-accent"
+                />
+                <span>Show closed</span>
+              </label>
+              <Link
+                href="/projects/new"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors"
+              >
+                + New Project
+              </Link>
+            </div>
           </div>
 
-          {/* Project Tiles Horizontal Scroll / Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {projects.map((proj) => {
+          {/* Project Tiles: Horizontal Scroll Strip on Mobile (390px), Grid on Desktop */}
+          <div className="flex overflow-x-auto pb-3 gap-3 no-scrollbar sm:grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 sm:overflow-visible sm:pb-0">
+            {displayedProjects.map((proj) => {
               const isSelected = proj.id === selectedProjectId;
+              const isClosed = proj.status === 'closed';
+
               return (
                 <div
                   key={proj.id}
                   onClick={() => handleSelectProject(proj.id)}
-                  className={`cursor-pointer rounded-2xl border p-4 shadow-xs transition-all select-none ${
+                  className={`w-[260px] shrink-0 sm:w-auto sm:shrink cursor-pointer rounded-2xl border p-4 shadow-xs transition-all select-none ${
                     isSelected
                       ? 'border-accent bg-surface ring-2 ring-accent/20'
                       : 'border-border bg-surface hover:border-accent/40 active:bg-surface-alt'
-                  }`}
+                  } ${isClosed ? 'opacity-60 bg-surface-alt/40' : ''}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <h2 className="text-sm font-bold text-text-primary truncate">{proj.name}</h2>
-                    {proj.escalatedCount > 0 && (
-                      <span className="shrink-0 rounded bg-danger-light px-1.5 py-0.2 text-[10px] font-bold text-danger">
-                        {proj.escalatedCount} esc
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {isClosed && (
+                        <span className="rounded bg-surface-alt border border-border px-1.5 py-0.2 text-[10px] font-bold text-text-muted">
+                          Closed
+                        </span>
+                      )}
+                      {proj.escalatedCount > 0 && !isClosed && (
+                        <span className="rounded bg-danger-light px-1.5 py-0.2 text-[10px] font-bold text-danger">
+                          {proj.escalatedCount} esc
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <p className="text-xs text-text-secondary truncate mt-0.5">
@@ -635,6 +740,11 @@ function HubContent() {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-base font-bold text-text-primary">{selectedProject.name}</h2>
+                  {selectedProject.status === 'closed' && (
+                    <span className="rounded-md bg-surface-alt px-2 py-0.5 text-xs text-text-muted font-bold border border-border">
+                      Closed
+                    </span>
+                  )}
                   <span className="rounded-md bg-surface-alt px-2 py-0.5 text-xs text-text-secondary font-medium border border-border">
                     {selectedProjectMetrics.total} Items
                   </span>
@@ -676,6 +786,27 @@ function HubContent() {
                 >
                   Configure Wizard
                 </Link>
+
+                {/* Close / Reopen Project */}
+                {selectedProject.status === 'closed' ? (
+                  <button
+                    type="button"
+                    onClick={handleReopenProject}
+                    disabled={updatingProjectStatus}
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors disabled:opacity-50"
+                  >
+                    {updatingProjectStatus ? 'Reopening…' : 'Reopen Project'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCloseProject}
+                    disabled={updatingProjectStatus}
+                    className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-xs font-semibold text-danger hover:bg-danger/10 transition-colors disabled:opacity-50"
+                  >
+                    {updatingProjectStatus ? 'Closing…' : 'Close Project'}
+                  </button>
+                )}
               </div>
             </div>
 
