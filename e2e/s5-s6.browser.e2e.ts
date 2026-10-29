@@ -24,7 +24,7 @@ let page: Page;
 let projectId = '';
 let visitId = '';
 let snapshot: ItemSnap[] = [];
-let startedAt = '';
+let visitsBefore = new Set<string>(); // ids, not timestamps: this PC's clock can drift from the DB's
 const ids: Record<'done' | 'pending' | 'na', string> = { done: '', pending: '', na: '' };
 
 const today = () => new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
@@ -35,10 +35,10 @@ const card = (text: string): Locator =>
   page.getByText(text, { exact: true }).locator('xpath=ancestor::div[.//button[contains(normalize-space(.), "Done")]][1]');
 
 test.beforeAll(async ({ browser }) => {
-  startedAt = new Date().toISOString();
   const p = await db.from('projects').select('id').eq('name', DEMO).single();
   if (p.error || !p.data) throw new Error(`"${DEMO}" missing: run npx tsx --env-file=.env.local scripts/seed-demo.ts`);
   projectId = p.data.id;
+  visitsBefore = new Set(((await db.from('site_visits').select('id').eq('project_id', projectId)).data ?? []).map((v) => v.id));
   const items = await db.from('dependency_items')
     .select('id, status, first_raised_on, completed_on, reminder_count, last_reminded_on, last_reminded_visit_id, note, photo_path, rooms!inner(name, floors!inner(label)), project_dependencies!inner(text)')
     .eq('project_id', projectId);
@@ -63,8 +63,8 @@ test.afterAll(async () => {
   await ctx?.close();
   if (!projectId) return;
   // 1. Delete only the visits this run created (cascades to visit_checks, dispatches, dispatch_items).
-  const mine = await db.from('site_visits').select('id').eq('project_id', projectId).gte('created_at', startedAt);
-  const visitIds = (mine.data ?? []).map((v) => v.id);
+  const now = await db.from('site_visits').select('id').eq('project_id', projectId);
+  const visitIds = (now.data ?? []).map((v) => v.id).filter((id) => !visitsBefore.has(id));
   if (visitIds.length) await db.from('site_visits').delete().in('id', visitIds);
   // 2. Remove photos uploaded during the run.
   const after = await db.from('dependency_items').select('id, photo_path').eq('project_id', projectId);
