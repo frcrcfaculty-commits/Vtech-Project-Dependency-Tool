@@ -1,7 +1,8 @@
 // Demo data: "Demo – Shah Residence", mirroring the Specimen tab of the "Vtech Project Dependency" sheet.
 // Usage: npx tsx --env-file=.env.local scripts/seed-demo.ts
 //
-// Idempotent: deletes the demo project (by exact name) and recreates it. Touches nothing else.
+// Idempotent: deletes the two demo projects (by exact name) and recreates them. Touches nothing else.
+// Second project "Demo – Mehta Villa" (office mode, v2) is built only via add_room_dependencies + set_item_status.
 // Uses the service-role key (scripts only — never ship this key to app/** or the browser).
 // Goes through the real RPCs (add_master_dependencies, apply_dependencies, finalize_visit) so the
 // data looks exactly like data entered through the app.
@@ -220,3 +221,146 @@ console.log(`created "${DEMO_NAME}" (${pid})`);
 console.log(`  floors ${floorRows.length} · rooms ${roomRows.length} · agencies ${AGENCIES.length} · contacts ${AGENCIES.reduce((s, a) => s + a.contacts.length, 0)}`);
 console.log(`  items ${items.length} (pending ${pending}, complete ${complete}) · visit ${visitDate} finalized, ${n} checks applied`);
 console.log(`  PM member: ${DEMO_PM_EMAIL}. Drafts are not pre-built: open the visit and use "rebuild drafts" (POST /api/visits/<id>/dispatches).`);
+
+// ═════════════ Office mode demo: "Demo – Mehta Villa" ═════════════
+// Built ONLY through the office RPCs (add_room_dependencies, set_item_status), signed in as the PM lead (the office
+// user), so item_events history carries a real author. Falls back to the service role (author blank) if no password.
+// Reminder counts are set directly at the end: in real use they come from sent reminder rounds, which need the
+// Next.js API; faking a sent dispatch here would duplicate dispatch logic.
+{
+  const NAME = 'Demo – Mehta Villa';
+  const LEAD_EMAIL = process.env.DEMO_LEAD_EMAIL ?? 'hansalgandhi+pmlead@gmail.com';
+  const LEAD_PASSWORD = process.env.DEMO_LEAD_PASSWORD ?? process.env.E2E_LEAD_PASSWORD;
+  const istDay = (ago: number) => new Date(Date.now() + 5.5 * 3600_000 - ago * 86_400_000).toISOString().slice(0, 10);
+
+  const del2 = await db.from('projects').delete().eq('name', NAME).select('id');
+  if (del2.error) throw new Error(`delete old ${NAME}: ${del2.error.message}`);
+
+  const lead = must<Rec>(await db.from('profiles').select('id').eq('email', LEAD_EMAIL).single(), `lead ${LEAD_EMAIL}`);
+  let office = db;
+  if (LEAD_PASSWORD) {
+    office = createClient(url!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
+    const { error } = await office.auth.signInWithPassword({ email: LEAD_EMAIL, password: LEAD_PASSWORD });
+    if (error) throw new Error(`sign in ${LEAD_EMAIL}: ${error.message}`);
+  } else {
+    console.warn(`  (no DEMO_LEAD_PASSWORD/E2E_LEAD_PASSWORD: building ${NAME} with the service role; history has no author)`);
+  }
+
+  const proj = must<Rec>(await office.from('projects').insert({
+    name: NAME, client_name: 'Mehta family (demo)', site_address: 'Demo bungalow, Lonavala', created_by: lead.id,
+  }).select('id').single(), 'insert Mehta project');
+  const mid = proj.id;
+  const floor = must<Rec>(await office.from('floors').insert({ project_id: mid, label: 'Ground Floor', sort: 1 }).select('id').single(), 'Mehta floor');
+  const ROOMS = ['Living Room', 'Kitchen', 'Master Bedroom', 'Home Theatre', 'Pooja Room'];
+  const mRooms = must(await office.from('rooms').insert(ROOMS.map((name, i) => ({ project_id: mid, floor_id: floor.id, name, sort: i + 1 })))
+    .select('id,name'), 'Mehta rooms');
+  const mRoom = (n: string) => mRooms.find((r) => r.name === n)!.id;
+
+  const MAG: { type: string; company: string; contacts: Contact[] }[] = [
+    { type: 'Electrician', company: 'Demo Lonavala Electricals', contacts: [
+      { name: 'Ganesh More', designation: 'Supervisor', level: 1, phone: '+919000000701', email: 'ganesh@lonavala-elec.example.com' },
+      { name: 'Sunil Kale', designation: 'Owner', level: 3, phone: '+919000000703', email: 'sunil@lonavala-elec.example.com' } ] },
+    { type: 'Carpenter', company: 'Demo Teak & Co', contacts: [
+      { name: 'Babu Mistry', designation: 'Head Carpenter', level: 1, phone: '+919000000711' },
+      { name: 'Hitesh Panchal', designation: 'Owner', level: 3, phone: '+919000000713', email: 'hitesh@teak.example.com' } ] },
+    { type: 'AC Vendor', company: 'Demo CoolAir HVAC', contacts: [
+      { name: 'Arif Khan', designation: 'Technician', level: 1, phone: '+919000000721', email: 'arif@coolair.example.com' },
+      { name: 'Meera Iyer', designation: 'Service Manager', level: 2, email: 'meera@coolair.example.com' } ] },
+    { type: 'AV Vendor', company: 'Demo SoundStage AV', contacts: [
+      { name: 'Karan Malhotra', designation: 'Installer', level: 1, phone: '+919000000731', email: 'karan@soundstage.example.com' },
+      { name: 'Ritu Bose', designation: 'Project Manager', level: 2, phone: '+919000000732', email: 'ritu@soundstage.example.com' },
+      { name: 'Anand Rao', designation: 'Director', level: 3, email: 'anand@soundstage.example.com' } ] },
+    { type: 'Network Agency', company: 'Demo NetLink', contacts: [
+      { name: 'Pradeep Nair', designation: 'Engineer', level: 1, phone: '+919000000741', email: 'pradeep@netlink.example.com' } ] },
+  ];
+  for (const a of MAG) {
+    const ag = must<Rec>(await office.from('agencies').insert({ project_id: mid, agency_type_id: typeId(a.type), company_name: a.company })
+      .select('id').single(), `Mehta agency ${a.type}`);
+    must(await office.from('agency_contacts').insert(a.contacts.map((c) => ({
+      project_id: mid, agency_id: ag.id, name: c.name, designation: c.designation, level: c.level, phone: c.phone ?? null, email: c.email ?? null,
+    }))).select('id'), `Mehta contacts ${a.type}`);
+  }
+
+  // [room, agency type, text, custom?, final state]
+  //   pending: raised N days ago, reminded R times, optional note (and a later follow-up note → 2 history events)
+  //   complete: raised then closed (2 history events) · na: not applicable · new: added pending today (on the go)
+  type St = { s: 'pending'; ago: number; rem: number; note?: string; later?: string } | { s: 'complete'; ago: number; doneAgo: number; note?: string }
+    | { s: 'na'; note?: string } | { s: 'new'; note?: string };
+  const PLAN: [string, string, string, boolean, St][] = [
+    ['Living Room', 'Electrician', 'Regular ceiling lights not yet installed.', false, { s: 'pending', ago: 30, rem: 7, note: 'Fittings not delivered.', later: 'Electrician promised Friday; third promise.' }],
+    ['Living Room', 'AV Vendor', 'Display device not yet installed for VTech to control.', false, { s: 'pending', ago: 21, rem: 4 }],
+    ['Living Room', 'Network Agency', 'Wi-Fi access points not yet installed and activated.', false, { s: 'complete', ago: 18, doneAgo: 4, note: 'Confirmed on call with site supervisor.' }],
+    ['Kitchen', 'Electrician', 'Decorative ceiling lights not yet installed.', false, { s: 'na', note: 'No decorative lights in kitchen per final drawings.' }],
+    ['Kitchen', 'Carpenter', 'Keypad cutout not done.', false, { s: 'pending', ago: 10, rem: 2 }],
+    ['Kitchen', 'AC Vendor', 'Outdoor termination of automation cable not done.', false, { s: 'pending', ago: 14, rem: 3, note: 'Outdoor unit on terrace; needs ladder access.' }],
+    ['Master Bedroom', 'Electrician', 'Curtain motor cable not at its position.', false, { s: 'complete', ago: 12, doneAgo: 2 }],
+    ['Master Bedroom', 'Carpenter', 'Door lock cutout not done.', false, { s: 'pending', ago: 5, rem: 1 }],
+    ['Master Bedroom', 'AC Vendor', 'CoolMaster / BACnet addressing pending.', false, { s: 'new', note: 'Reported by site engineer on phone today.' }],
+    ['Home Theatre', 'AV Vendor', 'Amplifier/home theatre system not yet installed for VTech to control.', false, { s: 'pending', ago: 25, rem: 5, note: 'Amplifier stuck at customs.' }],
+    ['Home Theatre', 'AV Vendor', 'Speakers not yet installed at their positions.', false, { s: 'complete', ago: 20, doneAgo: 6 }],
+    ['Home Theatre', 'Electrician', 'Speaker cable not at its position.', false, { s: 'complete', ago: 22, doneAgo: 9 }],
+    ['Home Theatre', 'Carpenter', 'Acoustic panel cutouts for speakers pending.', true, { s: 'pending', ago: 3, rem: 0 }],
+    ['Pooja Room', 'Electrician', 'Cove light DALI connection pending.', false, { s: 'pending', ago: 8, rem: 2 }],
+    ['Pooja Room', 'Network Agency', 'Local network not yet functional.', false, { s: 'na' }],
+  ];
+
+  const masterId = (type: string, text: string) => {
+    const m = masters.find((x) => x.agency_type_id === typeId(type) && x.text === text);
+    if (!m) throw new Error(`master item missing: ${type} / ${text}`);
+    return m.id as string;
+  };
+  // Room by room, as the office user adds them ("new" items are added already pending, raised today).
+  for (const room of ROOMS) {
+    const rows = PLAN.filter((p) => p[0] === room);
+    const normal = rows.filter((p) => p[4].s !== 'new');
+    must<number>(await office.rpc('add_room_dependencies', {
+      p_room: mRoom(room),
+      p_master_ids: normal.filter((p) => !p[3]).map((p) => masterId(p[1], p[2])),
+      p_custom: normal.filter((p) => p[3]).map((p) => ({ agency_type_id: typeId(p[1]), text: p[2] })),
+    }), `add_room_dependencies ${room}`);
+    for (const p of rows.filter((x) => x[4].s === 'new')) {
+      must<number>(await office.rpc('add_room_dependencies', {
+        p_room: mRoom(room), p_master_ids: p[3] ? [] : [masterId(p[1], p[2])],
+        p_custom: p[3] ? [{ agency_type_id: typeId(p[1]), text: p[2] }] : [], p_initial_status: 'pending', p_date: istDay(0),
+      }), `add pending ${p[2]}`);
+    }
+  }
+  const mItems = must(await office.from('dependency_items').select('id, room_id, agency_id, project_dependencies(text)').eq('project_id', mid), 'Mehta items');
+  type MI = { id: string; room_id: string; agency_id: string | null; project_dependencies: { text: string } | { text: string }[] };
+  const itemId = (room: string, text: string) => {
+    const it = (mItems as unknown as MI[]).find((i) => i.room_id === mRoom(room) &&
+      (Array.isArray(i.project_dependencies) ? i.project_dependencies[0] : i.project_dependencies).text === text);
+    if (!it) throw new Error(`Mehta item missing: ${room} / ${text}`);
+    return it.id;
+  };
+  if ((mItems as unknown as MI[]).some((i) => !i.agency_id)) throw new Error('Mehta: item without agency');
+
+  const setStatus = async (item: string, status: string, ago: number, note?: string) =>
+    must(await office.rpc('set_item_status', { p_item: item, p_status: status, p_date: istDay(ago), p_note: note ?? null, p_photo: null }), `set_item_status ${status}`);
+  for (const [room, , text, , st] of PLAN) {
+    const id = itemId(room, text);
+    if (st.s === 'pending') {
+      await setStatus(id, 'pending', st.ago, st.note);
+      if (st.later) await setStatus(id, 'pending', 1, st.later);
+      if (st.rem > 0) {
+        must(await office.from('dependency_items').update({ reminder_count: st.rem, last_reminded_on: istDay(Math.min(st.ago, 2)) })
+          .eq('id', id).select('id'), 'reminder count');
+      }
+    } else if (st.s === 'complete') {
+      await setStatus(id, 'pending', st.ago);
+      await setStatus(id, 'complete', st.doneAgo, st.note);
+    } else if (st.s === 'na') {
+      await setStatus(id, 'na', 7, st.note);
+    } else if (st.note) {
+      await setStatus(id, 'pending', 0, st.note);
+    }
+  }
+  if (LEAD_PASSWORD) await office.auth.signOut();
+
+  const fin = must(await db.from('dependency_items').select('status, reminder_count').eq('project_id', mid), 'Mehta final') as unknown as { status: string; reminder_count: number }[];
+  const ev = await db.from('item_events').select('id', { count: 'exact', head: true }).eq('project_id', mid);
+  const c = (s: string) => fin.filter((i) => i.status === s).length;
+  console.log(`created "${NAME}" (${mid})`);
+  console.log(`  floors 1 · rooms ${ROOMS.length} · agencies ${MAG.length} · items ${fin.length} (pending ${c('pending')}, complete ${c('complete')}, na ${c('na')}) · ` +
+    `reminded ${fin.filter((i) => i.reminder_count > 0).length} (max ${Math.max(...fin.map((i) => i.reminder_count))}) · history events ${ev.count}`);
+}
