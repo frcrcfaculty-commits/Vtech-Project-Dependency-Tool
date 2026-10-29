@@ -87,8 +87,10 @@ test('S5 site visit: sign in, start visit, mark Done (dated) / Pending (photo) /
   await page.waitForURL((u) => !u.pathname.startsWith('/login'));
 
   // Open the Demo project and start a visit
+  // Since office mode (O7) sign-in lands on the Hub; the classic flow starts from the Projects list.
   // The project card is a clickable <div> (no link role yet), so click its heading.
-  await page.getByRole('heading', { name: DEMO }).click();
+  await page.goto('/projects');
+  await page.getByRole('heading', { name: DEMO }).first().click();
   await page.waitForURL(new RegExp(`/projects/${projectId}$`));
   await page.getByRole('link', { name: /start site visit|new visit/i }).first().click();
   await page.getByRole('button', { name: /start visit/i }).click();
