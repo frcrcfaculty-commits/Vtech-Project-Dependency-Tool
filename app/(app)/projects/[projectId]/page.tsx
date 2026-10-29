@@ -655,6 +655,41 @@ export default function ProjectHomePage({
               </div>
             </div>
 
+            {/* Project Lifecycle Status */}
+            <div className="rounded-2xl border border-border bg-surface p-5 shadow-xs">
+              <h3 className="text-sm font-bold text-text-primary mb-2">Project Lifecycle</h3>
+              <p className="text-xs text-text-secondary mb-4 leading-relaxed">
+                Current status: <strong className="text-text-primary uppercase">{project?.status ?? 'active'}</strong>.
+                Closing a project hides it from the active Hub dashboard and routine follow-up queues.
+              </p>
+              {project?.status === 'closed' ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const sb = supabaseBrowser();
+                    await sb.from('projects').update({ status: 'active' }).eq('id', projectId);
+                    setProject((prev) => (prev ? { ...prev, status: 'active' } : null));
+                  }}
+                  className="rounded-lg border border-border bg-surface px-4 py-2 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors"
+                >
+                  Reopen Project
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!confirm('Close this project? It will be hidden from the active Hub view.')) return;
+                    const sb = supabaseBrowser();
+                    await sb.from('projects').update({ status: 'closed' }).eq('id', projectId);
+                    setProject((prev) => (prev ? { ...prev, status: 'closed' } : null));
+                  }}
+                  className="rounded-lg border border-danger/30 bg-danger/5 px-4 py-2 text-xs font-semibold text-danger hover:bg-danger/10 transition-colors"
+                >
+                  Close Project
+                </button>
+              )}
+            </div>
+
             {/* Current Escalation Policy Summary */}
             <div className="rounded-2xl border border-border bg-surface p-5 shadow-xs">
               <h3 className="text-sm font-bold text-text-primary mb-2">Escalation Policy</h3>
