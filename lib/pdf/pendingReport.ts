@@ -68,9 +68,17 @@ function runs(text: string, face: Face): Run[] {
 }
 
 /** Replace characters neither font can draw, so pdf-lib never throws on odd input (emoji, CJK, control chars). */
-function sanitize(text: string, face: Face): string {
-  const latinSet = new Set(face.latin.getCharacterSet());
-  const devaSet = new Set(face.deva.getCharacterSet());
+// getCharacterSet() walks the whole font: build each font's set once, not once per cell.
+const charSets = new WeakMap<PDFFont, Set<number>>();
+const charSet = (f: PDFFont) => {
+  let s = charSets.get(f);
+  if (!s) { s = new Set(f.getCharacterSet()); charSets.set(f, s); }
+  return s;
+};
+
+export function sanitize(text: string, face: Face): string {
+  const latinSet = charSet(face.latin);
+  const devaSet = charSet(face.deva);
   let s = '';
   for (const ch of text.replace(/[\r\t]/g, ' ')) {
     const cp = ch.codePointAt(0)!;
@@ -80,7 +88,20 @@ function sanitize(text: string, face: Face): string {
   return s;
 }
 
-const width = (t: string, face: Face, size: number) => runs(t, face).reduce((w, r) => w + r.font.widthOfTextAtSize(r.text, size), 0);
+// Measuring is the hot path (fontkit shapes Devanagari on every call, and wrap() re-measures growing lines):
+// cache widths per face. Width is linear in size, so cache at size 1 and scale.
+const widthCache = new WeakMap<Face, Map<string, number>>();
+export const width = (t: string, face: Face, size: number) => {
+  let c = widthCache.get(face);
+  if (!c) { c = new Map(); widthCache.set(face, c); }
+  let w = c.get(t);
+  if (w === undefined) {
+    w = runs(t, face).reduce((s, r) => s + r.font.widthOfTextAtSize(r.text, 1), 0);
+    if (c.size > 50_000) c.clear();
+    c.set(t, w);
+  }
+  return w * size;
+};
 
 export function wrap(text: string, face: Face, size: number, max: number): string[] {
   const lines: string[] = [];
@@ -102,7 +123,7 @@ export function wrap(text: string, face: Face, size: number, max: number): strin
   return lines;
 }
 
-function draw(page: PDFPage, text: string, x: number, y: number, face: Face, size: number, color = rgb(0.1, 0.1, 0.1)) {
+export function draw(page: PDFPage, text: string, x: number, y: number, face: Face, size: number, color = rgb(0.1, 0.1, 0.1)) {
   for (const r of runs(text, face)) {
     page.drawText(r.text, { x, y, size, font: r.font, color });
     x += r.font.widthOfTextAtSize(r.text, size);
