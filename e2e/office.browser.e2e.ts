@@ -190,15 +190,18 @@ test('Hub → Send reminders → review & send: email (dryrun) + WhatsApp confir
   }
 });
 
-// Blocked by a UI bug (reported to Antigravity in PR #19): the Pending page's query embeds `projects:project_id(...)`,
-// a relationship PostgREST can't resolve (dependency_items has no FK to projects), so the list is always empty.
-// Remove .fixme once fixed; this then checks "select 2 items → Send reminders → only those 2".
-test.fixme('Pending list: select 2 items → Send reminders → review & send has only those 2', async () => {
+// Pending list (fixed on main in fa1f62f): select 2 items of one project → Send reminders goes straight to review & send.
+test('Pending list: select 2 items → Send reminders → review & send has only those 2', async () => {
   await page.goto('/pending');
+  // The same master texts are pending in the Demo projects too: narrow the list with the page's project filter.
+  await page.locator('select').filter({ has: page.locator('option', { hasText: /All Projects/ }) }).selectOption(projectId);
   for (const t of [MASTER[0], ON_THE_GO]) await page.getByRole('checkbox', { name: `Select dependency: ${t}` }).check();
   await page.getByRole('button', { name: /send reminders \(2\)/i }).click();
   await page.waitForURL(/\/visits\/[0-9a-f-]{36}\/dispatches$/);
   const visitId = page.url().split('/visits/')[1].split('/')[0];
   const di = await db.from('dispatch_items').select('item_id, dispatches!inner(visit_id)').eq('dispatches.visit_id', visitId);
-  expect(new Set(di.data!.map((d) => d.item_id)).size).toBe(2);
+  const chosen = [(await byText(MASTER[0])).id, (await byText(ON_THE_GO)).id].sort();
+  expect([...new Set(di.data!.map((d) => d.item_id))].sort()).toEqual(chosen);
+  const d = await db.from('dispatches').select('channel').eq('visit_id', visitId);
+  expect(d.data!.map((x) => x.channel).sort()).toEqual(['email', 'whatsapp']);
 });
