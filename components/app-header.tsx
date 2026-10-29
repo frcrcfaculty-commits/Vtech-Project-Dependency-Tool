@@ -78,16 +78,6 @@ export function AppHeader() {
                 >
                   Projects
                 </Link>
-                <Link
-                  href="/admin"
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                    pathname.startsWith('/admin')
-                      ? 'bg-surface-alt text-text-primary font-semibold'
-                      : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                >
-                  Admin
-                </Link>
                 {isSuperAdmin && (
                   <Link
                     href="/dashboard"
@@ -100,6 +90,16 @@ export function AppHeader() {
                     Dashboard
                   </Link>
                 )}
+                <Link
+                  href="/admin"
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    pathname.startsWith('/admin')
+                      ? 'bg-surface-alt text-text-primary font-semibold'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Admin
+                </Link>
               </nav>
             )}
           </div>
