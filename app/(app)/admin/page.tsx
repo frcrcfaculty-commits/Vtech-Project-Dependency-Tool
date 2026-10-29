@@ -358,6 +358,14 @@ export default function AdminPage() {
                 Manage VTech staff accounts, project assignments, and master dependency catalogue.
               </p>
             </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/projects"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-secondary hover:bg-surface-alt hover:text-text-primary transition-colors"
+              >
+                Site visit mode (classic) →
+              </Link>
+            </div>
           </div>
         </div>
 

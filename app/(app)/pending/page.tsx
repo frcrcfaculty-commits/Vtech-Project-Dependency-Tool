@@ -156,6 +156,15 @@ export default function PendingPage() {
     loadPendingData();
   }, [loadPendingData]);
 
+  // Listen for global dependency additions (O5: appear in pending list without reload)
+  useEffect(() => {
+    const handleAdded = () => {
+      loadPendingData();
+    };
+    window.addEventListener('vtech:dependency-added', handleAdded);
+    return () => window.removeEventListener('vtech:dependency-added', handleAdded);
+  }, [loadPendingData]);
+
   // Map contacts by agency_id (sorted by level ASC: level 1 site engineer first)
   const contactsByAgency = useMemo(() => {
     const map = new Map<string, AgencyContact[]>();

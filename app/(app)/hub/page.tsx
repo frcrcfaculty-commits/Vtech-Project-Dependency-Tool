@@ -266,6 +266,16 @@ function HubContent() {
     loadProjects();
   }, [loadProjects]);
 
+  // Listen for global dependency additions to refresh counts & details
+  useEffect(() => {
+    const handleAdded = () => {
+      loadProjects();
+      if (selectedProjectId) loadProjectDetails(selectedProjectId);
+    };
+    window.addEventListener('vtech:dependency-added', handleAdded);
+    return () => window.removeEventListener('vtech:dependency-added', handleAdded);
+  }, [loadProjects, selectedProjectId, loadProjectDetails]);
+
   useEffect(() => {
     if (selectedProjectId) {
       loadProjectDetails(selectedProjectId);

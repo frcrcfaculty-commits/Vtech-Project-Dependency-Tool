@@ -294,8 +294,14 @@ export default function ProjectHomePage({
               )}
             </div>
 
-            {/* Quick Action: Start Visit */}
+            {/* Quick Action: Site visit (classic) & Start Site Visit */}
             <div className="flex items-center gap-2">
+              <Link
+                href={`/projects/${projectId}/visits/new`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold text-text-secondary hover:bg-surface-alt hover:text-text-primary transition-colors"
+              >
+                Site visit (classic)
+              </Link>
               <Link
                 href={`/projects/${projectId}/visits/new`}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-accent-hover transition-colors"
