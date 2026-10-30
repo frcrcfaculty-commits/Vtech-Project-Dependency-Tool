@@ -6,6 +6,7 @@ import { supabaseBrowser } from '@/lib/client/supabase';
 import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
 import { compressImageToWebP } from '@/lib/client/image';
+import { todayIST } from '@/lib/client/date';
 import { getEscalationLevel, isEscalated, formatEscalationLabel } from '@/lib/client/escalation';
 import { getStepDotColor } from '@/components/room-product-picker';
 import Link from 'next/link';
@@ -388,7 +389,7 @@ function HubContent() {
   // Open status sheet for an item
   const openStatusSheet = (item: DependencyItem, target: 'complete' | 'pending' | 'na') => {
     setStatusTargetItem({ item, targetStatus: target });
-    setStatusDate(new Date().toISOString().slice(0, 10));
+    setStatusDate(todayIST());
     setStatusNote(item.note ?? '');
     setPhotoFile(null);
     setPhotoPreview(null);
@@ -442,7 +443,7 @@ function HubContent() {
       const { data: updatedItem, error: rpcErr } = await sb.rpc('set_item_status', {
         p_item: item.id,
         p_status: targetStatus,
-        p_date: statusDate || new Date().toISOString().slice(0, 10),
+        p_date: statusDate || todayIST(),
         p_note: statusNote.trim() || null,
         p_photo: storagePath,
       });
