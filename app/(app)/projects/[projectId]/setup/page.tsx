@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, use } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/client/supabase';
+import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
 import { RoomDependencyPicker } from '@/components/room-dependency-picker';
 import Link from 'next/link';
@@ -26,6 +27,7 @@ interface AgencyType {
   id: string;
   name: string;
   sort: number;
+  internal?: boolean;
 }
 
 interface AgencyContact {
@@ -78,6 +80,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
   const { projectId } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { profile } = useAuth();
 
   // Step state: 1: Basics, 2: Floors & Rooms, 3: Agencies, 4: Dependencies, 5: Apply to Rooms, 6: Escalation & Terms
   const initialStep = Math.max(1, Math.min(6, parseInt(searchParams.get('step') ?? '2', 10)));
@@ -109,6 +112,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
 
   // Step 3 local states (New agency form)
   const [showAddAgency, setShowAddAgency] = useState(false);
+  const [agencyModalMode, setAgencyModalMode] = useState<'external' | 'internal'>('external');
   const [newAgencyTypeId, setNewAgencyTypeId] = useState('');
   const [newAgencyCompany, setNewAgencyCompany] = useState('');
   const [newAgencyEscalation, setNewAgencyEscalation] = useState(true);
@@ -409,9 +413,104 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
       setNewAgencyCompany('');
       setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
       await loadAll();
-      showSuccessNotice('Agency added');
+      showSuccessNotice(agencyModalMode === 'internal' ? 'Internal team added' : 'Agency added');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save agency');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // One-click Add VTech Team from pre-suggestions
+  async function handleAddSuggestedVtechTeam(t: AgencyType) {
+    setSaving(true);
+    setError(null);
+    try {
+      const sb = supabaseBrowser();
+      const { data: newAg, error: agErr } = await sb
+        .from('agencies')
+        .insert({
+          project_id: projectId,
+          agency_type_id: t.id,
+          company_name: t.name,
+          escalation_enabled: true,
+        })
+        .select('id')
+        .single();
+      if (agErr) throw agErr;
+
+      const { error: contErr } = await sb.from('agency_contacts').insert({
+        project_id: projectId,
+        agency_id: newAg.id,
+        name: profile?.full_name || 'VTech Office Lead',
+        designation: t.name.replace('VTech ', '') + ' Lead',
+        level: 1,
+        phone: profile?.phone || '+91 98200 00000',
+        email: profile?.email || 'office@vtechpl.com',
+      });
+      if (contErr) console.warn('Could not add contact for internal team:', contErr);
+
+      await loadAll();
+      showSuccessNotice(`Added ${t.name}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to add ${t.name}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Add all unadded canonical VTech teams
+  async function handleAddAllVtechTeams(teams: AgencyType[]) {
+    if (teams.length === 0) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const sb = supabaseBrowser();
+      for (const t of teams) {
+        const { data: newAg, error: agErr } = await sb
+          .from('agencies')
+          .insert({
+            project_id: projectId,
+            agency_type_id: t.id,
+            company_name: t.name,
+            escalation_enabled: true,
+          })
+          .select('id')
+          .single();
+        if (agErr) throw agErr;
+
+        await sb.from('agency_contacts').insert({
+          project_id: projectId,
+          agency_id: newAg.id,
+          name: profile?.full_name || 'VTech Office Lead',
+          designation: t.name.replace('VTech ', '') + ' Lead',
+          level: 1,
+          phone: profile?.phone || '+91 98200 00000',
+          email: profile?.email || 'office@vtechpl.com',
+        });
+      }
+      await loadAll();
+      showSuccessNotice(`Added ${teams.length} VTech team(s)`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add VTech teams');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Delete Agency handler
+  async function handleDeleteAgency(agencyId: string, agencyName: string) {
+    if (!confirm(`Are you sure you want to remove "${agencyName}"?`)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const sb = supabaseBrowser();
+      const { error: err } = await sb.from('agencies').delete().eq('id', agencyId);
+      if (err) throw err;
+      await loadAll();
+      showSuccessNotice(`Removed ${agencyName}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove agency');
     } finally {
       setSaving(false);
     }
@@ -876,94 +975,328 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
         )}
 
         {/* ───────────────────────── STEP 3 ───────────────────────── */}
-        {currentStep === 3 && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-text-primary">Agencies &amp; Contacts</h2>
-                <p className="text-xs text-text-secondary">
-                  Add the contractors (electrician, carpenter, AC, etc.) working on this site.
-                </p>
+        {currentStep === 3 && (() => {
+          const externalAgencies = agencies.filter(
+            (a) => !agencyTypes.find((t) => t.id === a.agency_type_id)?.internal
+          );
+          const internalAgencies = agencies.filter(
+            (a) => agencyTypes.find((t) => t.id === a.agency_type_id)?.internal
+          );
+          const vtechCanonicalNames = ['VTech Installers', 'VTech Programmers', 'VTech Project Managers'];
+          const unaddedVtechTeams = agencyTypes
+            .filter((t) => t.internal && vtechCanonicalNames.includes(t.name))
+            .filter((t) => !agencies.some((a) => a.agency_type_id === t.id));
+
+          return (
+            <div className="space-y-8">
+              {/* Step 3 Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
+                <div>
+                  <h2 className="text-base font-semibold text-text-primary">Agencies &amp; Contacts</h2>
+                  <p className="text-xs text-text-secondary mt-0.5">
+                    Configure external contractors and internal VTech teams assigned to this site.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAgencyModalMode('external');
+                      setNewAgencyTypeId('');
+                      setNewAgencyCompany('');
+                      setNewAgencyEscalation(true);
+                      setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
+                      setShowAddAgency(true);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors"
+                  >
+                    + Add External Agency
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAgencyModalMode('internal');
+                      setNewAgencyTypeId('');
+                      setNewAgencyCompany('');
+                      setNewAgencyEscalation(true);
+                      setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
+                      setShowAddAgency(true);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors"
+                  >
+                    + Add Internal Team
+                  </button>
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowAddAgency(true)}
-                className="inline-flex items-center gap-1 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white shadow-sm hover:bg-accent-hover transition-colors"
-              >
-                + Add Agency
-              </button>
-            </div>
-
-            {/* Existing Agencies List */}
-            {agencies.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-border bg-surface p-8 text-center text-xs text-text-muted">
-                No agencies added yet. Click &quot;+ Add Agency&quot; to configure your contractors.
-              </div>
-            ) : (
+              {/* SECTION 1: EXTERNAL AGENCIES */}
               <div className="space-y-3">
-                {agencies.map((agency) => {
-                  const type = agencyTypes.find((t) => t.id === agency.agency_type_id);
-                  return (
-                    <div key={agency.id} className="rounded-2xl border border-border bg-surface p-5 shadow-xs">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <span className="inline-block rounded-md bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent mb-1">
-                            {type?.name ?? 'Agency'}
-                          </span>
-                          <h3 className="text-base font-bold text-text-primary">{agency.company_name}</h3>
-                          <p className="text-xs text-text-secondary mt-0.5">
-                            Escalation: {agency.escalation_enabled ? 'Enabled (L1–L3)' : 'Disabled'}
-                          </p>
-                        </div>
-                      </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-text-primary flex items-center gap-2">
+                      <span>External Agencies</span>
+                      <span className="rounded-full bg-surface-alt border border-border px-2 py-0.2 text-xs font-semibold text-text-secondary">
+                        {externalAgencies.length}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      Contractors &amp; vendors (Electrician, Carpenter, Painter, AC, Architect, Client, etc.)
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAgencyModalMode('external');
+                      setNewAgencyTypeId('');
+                      setNewAgencyCompany('');
+                      setNewAgencyEscalation(true);
+                      setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
+                      setShowAddAgency(true);
+                    }}
+                    className="text-xs font-semibold text-accent hover:underline sm:hidden"
+                  >
+                    + Add External
+                  </button>
+                </div>
 
-                      {/* Contacts list */}
-                      <div className="mt-3 pt-3 border-t border-border/70 space-y-1.5">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                          Contacts ({agency.agency_contacts?.length ?? 0}):
-                        </p>
-                        {(agency.agency_contacts ?? []).map((c, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs bg-surface-alt rounded-lg px-3 py-1.5">
+                {externalAgencies.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-border bg-surface p-6 text-center text-xs text-text-muted">
+                    No external agencies added yet. Click &quot;+ Add External Agency&quot; to configure contractors.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {externalAgencies.map((agency) => {
+                      const type = agencyTypes.find((t) => t.id === agency.agency_type_id);
+                      return (
+                        <div key={agency.id} className="rounded-2xl border border-border bg-surface p-5 shadow-xs">
+                          <div className="flex items-start justify-between">
                             <div>
-                              <span className="font-semibold text-text-primary">{c.name}</span>
-                              <span className="text-text-muted ml-1.5">({c.designation})</span>
-                              <span className="ml-2 rounded-sm bg-border px-1.5 py-0.2 text-[10px] font-medium text-text-secondary">
-                                L{c.level}
+                              <span className="inline-block rounded-md bg-surface-alt border border-border px-2 py-0.5 text-xs font-semibold text-text-secondary mb-1">
+                                {type?.name ?? 'Agency'}
                               </span>
+                              <h4 className="text-base font-bold text-text-primary">{agency.company_name}</h4>
+                              <p className="text-xs text-text-secondary mt-0.5">
+                                Escalation: {agency.escalation_enabled ? 'Enabled (L1–L3)' : 'Disabled'}
+                              </p>
                             </div>
-                            <div className="text-text-secondary flex gap-2">
-                              {c.phone && <span>{c.phone}</span>}
-                              {c.email && <span>{c.email}</span>}
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAgency(agency.id, agency.company_name)}
+                              className="text-text-muted hover:text-danger text-xs font-medium px-2 py-1 rounded hover:bg-danger-light/30 transition-colors"
+                            >
+                              Remove
+                            </button>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
 
-            {/* Navigation buttons */}
-            <div className="flex justify-between pt-2">
-              <button
-                type="button"
-                onClick={() => setCurrentStep(2)}
-                className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-surface transition-colors"
-              >
-                ← Back
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentStep(4)}
-                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-accent-hover transition-colors"
-              >
-                Next: Dependencies →
-              </button>
+                          {/* Contacts list */}
+                          <div className="mt-3 pt-3 border-t border-border/70 space-y-1.5">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                              Contacts ({agency.agency_contacts?.length ?? 0}):
+                            </p>
+                            {(agency.agency_contacts ?? []).map((c, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs bg-surface-alt rounded-lg px-3 py-1.5">
+                                <div>
+                                  <span className="font-semibold text-text-primary">{c.name}</span>
+                                  <span className="text-text-muted ml-1.5">({c.designation})</span>
+                                  <span className="ml-2 rounded-sm bg-border px-1.5 py-0.2 text-[10px] font-medium text-text-secondary">
+                                    L{c.level}
+                                  </span>
+                                </div>
+                                <div className="text-text-secondary flex gap-2">
+                                  {c.phone && <span>{c.phone}</span>}
+                                  {c.email && <span>{c.email}</span>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 2: INTERNAL TEAM (VTECH) */}
+              <div className="space-y-4 pt-4 border-t border-border">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-text-primary flex items-center gap-2">
+                      <span>Internal Team (VTech)</span>
+                      <span className="rounded-full bg-accent/10 border border-accent/20 px-2 py-0.2 text-xs font-semibold text-accent">
+                        {internalAgencies.length}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      Internal execution teams responsible for installation, programming, and project management.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAgencyModalMode('internal');
+                      setNewAgencyTypeId('');
+                      setNewAgencyCompany('');
+                      setNewAgencyEscalation(true);
+                      setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
+                      setShowAddAgency(true);
+                    }}
+                    className="text-xs font-semibold text-accent hover:underline sm:hidden"
+                  >
+                    + Add Team
+                  </button>
+                </div>
+
+                {/* Pre-suggestions for the 3 VTech teams */}
+                {unaddedVtechTeams.length > 0 && (
+                  <div className="rounded-2xl border border-dashed border-accent/40 bg-accent/5 p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-xs font-bold text-text-primary">
+                          Pre-suggested VTech Teams ({unaddedVtechTeams.length} available)
+                        </h4>
+                        <p className="text-[11px] text-text-secondary">
+                          Standard execution chain from the sheet legend. One click to add each team.
+                        </p>
+                      </div>
+                      {unaddedVtechTeams.length > 1 && (
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => handleAddAllVtechTeams(unaddedVtechTeams)}
+                          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-accent-hover transition-colors disabled:opacity-50"
+                        >
+                          Add all {unaddedVtechTeams.length} teams
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {unaddedVtechTeams.map((t) => {
+                        const isInstallers = t.name.includes('Installers');
+                        const isProgrammers = t.name.includes('Programmers');
+                        const colourBadge = isInstallers
+                          ? 'bg-[#E06666]/15 text-[#991b1b] border-[#E06666]/30'
+                          : isProgrammers
+                          ? 'bg-[#F4CCCC] text-[#991b1b] border-[#e06666]/30'
+                          : 'bg-[#F9CB9C] text-[#9a3412] border-[#f97316]/30';
+                        const desc = isInstallers
+                          ? 'Dark red · Hardware mounting & terminations'
+                          : isProgrammers
+                          ? 'Light red · Scene & automation programming'
+                          : 'Orange · Coordination & client handoff';
+
+                        return (
+                          <div
+                            key={t.id}
+                            className="flex flex-col justify-between rounded-xl border border-border bg-surface p-3 shadow-2xs space-y-2.5"
+                          >
+                            <div>
+                              <span className={`inline-block rounded border px-1.5 py-0.5 text-[10px] font-bold ${colourBadge}`}>
+                                {t.name}
+                              </span>
+                              <p className="text-[11px] text-text-secondary mt-1.5 leading-snug">
+                                {desc}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => handleAddSuggestedVtechTeam(t)}
+                              className="w-full inline-flex items-center justify-center rounded-lg border border-accent bg-accent/10 px-2.5 py-1.5 text-xs font-bold text-accent hover:bg-accent hover:text-white transition-colors disabled:opacity-50"
+                            >
+                              + Add VTech team
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Internal Agencies List */}
+                {internalAgencies.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-border bg-surface p-6 text-center text-xs text-text-muted">
+                    No internal teams added to this project yet. Use the pre-suggested teams above or click &quot;+ Add Internal Team&quot;.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {internalAgencies.map((agency) => {
+                      const type = agencyTypes.find((t) => t.id === agency.agency_type_id);
+                      return (
+                        <div key={agency.id} className="rounded-2xl border border-border bg-surface p-5 shadow-xs">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="inline-block rounded-md bg-accent/15 text-accent border border-accent/20 px-2 py-0.5 text-xs font-semibold">
+                                  {type?.name ?? 'Internal Team'}
+                                </span>
+                                <span className="rounded bg-surface-alt px-1.5 py-0.2 text-[10px] font-bold text-text-muted uppercase">
+                                  [Internal]
+                                </span>
+                              </div>
+                              <h4 className="text-base font-bold text-text-primary">{agency.company_name}</h4>
+                              <p className="text-xs text-text-secondary mt-0.5">
+                                Escalation: {agency.escalation_enabled ? 'Enabled (L1–L3)' : 'Disabled'}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAgency(agency.id, agency.company_name)}
+                              className="text-text-muted hover:text-danger text-xs font-medium px-2 py-1 rounded hover:bg-danger-light/30 transition-colors"
+                            >
+                              Remove
+                            </button>
+                          </div>
+
+                          {/* Contacts list */}
+                          <div className="mt-3 pt-3 border-t border-border/70 space-y-1.5">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                              Contacts ({agency.agency_contacts?.length ?? 0}):
+                            </p>
+                            {(agency.agency_contacts ?? []).map((c, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs bg-surface-alt rounded-lg px-3 py-1.5">
+                                <div>
+                                  <span className="font-semibold text-text-primary">{c.name}</span>
+                                  <span className="text-text-muted ml-1.5">({c.designation})</span>
+                                  <span className="ml-2 rounded-sm bg-border px-1.5 py-0.2 text-[10px] font-medium text-text-secondary">
+                                    L{c.level}
+                                  </span>
+                                </div>
+                                <div className="text-text-secondary flex gap-2">
+                                  {c.phone && <span>{c.phone}</span>}
+                                  {c.email && <span>{c.email}</span>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Navigation buttons */}
+              <div className="flex justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(2)}
+                  className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-surface transition-colors"
+                >
+                  ← Back
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(4)}
+                  className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-accent-hover transition-colors"
+                >
+                  Next: Dependencies →
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ───────────────────────── STEP 4 (OFFICE MODE): ROOM-BY-ROOM ───────────────────────── */}
         {!isClassic && currentStep === 4 && (
@@ -1406,36 +1739,96 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
         {showAddAgency && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
             <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-xl">
-              <h3 className="text-base font-bold mb-3">Add Agency</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-bold">
+                  {agencyModalMode === 'internal' ? 'Add Internal Team' : 'Add External Agency'}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowAddAgency(false)}
+                  className="text-text-muted hover:text-text-primary text-sm font-bold p-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Mode switch tabs */}
+              <div className="flex rounded-lg bg-surface-alt p-1 mb-4 border border-border">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAgencyModalMode('external');
+                    setNewAgencyTypeId('');
+                    setNewAgencyCompany('');
+                  }}
+                  className={`flex-1 rounded-md py-1.5 text-xs font-semibold text-center transition-colors ${
+                    agencyModalMode === 'external'
+                      ? 'bg-surface text-text-primary shadow-xs'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  External Agency
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAgencyModalMode('internal');
+                    setNewAgencyTypeId('');
+                    setNewAgencyCompany('');
+                  }}
+                  className={`flex-1 rounded-md py-1.5 text-xs font-semibold text-center transition-colors ${
+                    agencyModalMode === 'internal'
+                      ? 'bg-surface text-text-primary shadow-xs'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Internal Team (VTech)
+                </button>
+              </div>
+
               <form onSubmit={handleSaveNewAgency} className="space-y-3.5">
                 <div>
-                  <label className="block text-xs font-semibold text-text-secondary mb-1">Agency Type</label>
+                  <label className="block text-xs font-semibold text-text-secondary mb-1">
+                    {agencyModalMode === 'internal' ? 'VTech Team Type' : 'Agency Type'}
+                  </label>
                   <select
                     required
                     value={newAgencyTypeId}
-                    onChange={(e) => setNewAgencyTypeId(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNewAgencyTypeId(val);
+                      if (agencyModalMode === 'internal') {
+                        const matchedType = agencyTypes.find((t) => t.id === val);
+                        if (matchedType && !newAgencyCompany) {
+                          setNewAgencyCompany(matchedType.name);
+                        }
+                      }
+                    }}
                     className="w-full rounded-lg border border-border px-3 py-2 text-xs focus:border-accent"
                   >
                     <option value="">Select type…</option>
-                    {agencyTypes.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
+                    {agencyTypes
+                      .filter((t) => (agencyModalMode === 'internal' ? t.internal : !t.internal))
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-text-secondary mb-1">Company Name</label>
+                  <label className="block text-xs font-semibold text-text-secondary mb-1">
+                    {agencyModalMode === 'internal' ? 'Team Name / Label' : 'Company Name'}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Omkar Electricals"
+                    placeholder={agencyModalMode === 'internal' ? 'e.g. VTech Installers' : 'e.g. Omkar Electricals'}
                     value={newAgencyCompany}
                     onChange={(e) => setNewAgencyCompany(e.target.value)}
                     className="w-full rounded-lg border border-border px-3 py-2 text-xs focus:border-accent"
-                  >
-                  </input>
+                  />
                 </div>
 
                 <div className="flex items-center gap-2">
