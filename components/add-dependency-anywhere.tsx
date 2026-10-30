@@ -34,6 +34,25 @@ interface CustomEntry {
   text: string;
 }
 
+interface ProductCatalogueOption {
+  id: string;
+  title: string;
+  scope: 'room' | 'project';
+  location_options: string[];
+}
+
+interface ProductStepOption {
+  id: string;
+  product_id: string;
+  seq: number;
+  label: string;
+  phase: number;
+  responsibility: 'external' | 'internal' | 'client';
+  gate: string;
+  sheet_colour: string | null;
+  agency_types?: { name: string } | null;
+}
+
 export function AddDependencyAnywhere() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -63,6 +82,16 @@ export function AddDependencyAnywhere() {
   const [customEntries, setCustomEntries] = useState<CustomEntry[]>([]);
   const [customText, setCustomText] = useState('');
   const [customTypeId, setCustomTypeId] = useState('');
+
+  // Modal Tab: 'product' | 'custom' (v3 P5)
+  const [modalTab, setModalTab] = useState<'product' | 'custom'>('product');
+  const [products, setProducts] = useState<ProductCatalogueOption[]>([]);
+  const [productSteps, setProductSteps] = useState<ProductStepOption[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [customLocationText, setCustomLocationText] = useState<string>('');
+  const [productQuantity, setProductQuantity] = useState<number>(1);
+  const [productNote, setProductNote] = useState<string>('');
 
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
@@ -96,10 +125,12 @@ export function AddDependencyAnywhere() {
       setError(null);
       const sb = supabaseBrowser();
 
-      const [projRes, typeRes, masterRes] = await Promise.all([
+      const [projRes, typeRes, masterRes, prodRes, stepRes] = await Promise.all([
         sb.from('projects').select('id, name').neq('status', 'closed').order('name'),
         sb.from('agency_types').select('id, name').order('sort'),
         sb.from('master_dependencies').select('id, agency_type_id, text, origin, active').eq('active', true).order('seq'),
+        sb.from('product_catalogue').select('id, title, scope, location_options').eq('active', true).order('sort').order('title'),
+        sb.from('product_steps').select('id, product_id, seq, label, phase, responsibility, gate, sheet_colour, default_agency_type_id, agency_types(name)').order('seq'),
       ]);
 
       if (projRes.error) throw projRes.error;
@@ -109,6 +140,15 @@ export function AddDependencyAnywhere() {
       setProjects(projRes.data ?? []);
       setAgencyTypes(typeRes.data ?? []);
       setMasterDeps(masterRes.data ?? []);
+      const loadedProducts = (prodRes.data as ProductCatalogueOption[]) ?? [];
+      setProducts(loadedProducts);
+      setProductSteps((stepRes.data as unknown as ProductStepOption[]) ?? []);
+      if (loadedProducts.length > 0 && !selectedProductId) {
+        setSelectedProductId(loadedProducts[0].id);
+        if (loadedProducts[0].location_options && loadedProducts[0].location_options.length > 0) {
+          setSelectedLocation(loadedProducts[0].location_options[0]);
+        }
+      }
 
       if (typeRes.data && typeRes.data.length > 0 && !customTypeId) {
         setCustomTypeId(typeRes.data[0].id);
@@ -275,6 +315,64 @@ export function AddDependencyAnywhere() {
     return Array.from(map.values());
   }, [filteredMasterItems, agencyTypes]);
 
+
+  // Add product to room handler (v3 P5)
+  const handleAddProductToRoom = async () => {
+    if (loadingRooms || !selectedRoomId) {
+      setError('Please wait for rooms to load and select a room.');
+      return;
+    }
+    if (!selectedProductId) {
+      setError('Please select a product from the catalogue.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError(null);
+      const sb = supabaseBrowser();
+      const loc = customLocationText.trim() || selectedLocation || null;
+
+      const { error: rpcErr } = await sb.rpc('add_room_product', {
+        p_project: selectedProjectId,
+        p_room: selectedRoomId,
+        p_product: selectedProductId,
+        p_location: loc,
+        p_quantity: productQuantity,
+        p_note: productNote.trim() || null,
+      });
+
+      if (rpcErr) throw rpcErr;
+
+      setIsOpen(false);
+      const prod = products.find((p) => p.id === selectedProductId);
+      const roomObj = rooms.find((r) => r.id === selectedRoomId);
+      setSuccessNotice(`Added ${prod?.title ?? 'Product'} to ${roomObj ? `${roomObj.floorLabel} · ${roomObj.name}` : 'room'}`);
+      setTimeout(() => setSuccessNotice(null), 3500);
+
+      // Reset product form defaults
+      setCustomLocationText('');
+      setProductNote('');
+      setProductQuantity(1);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('vtech:dependency-added', {
+            detail: {
+              projectId: selectedProjectId,
+              roomId: selectedRoomId,
+              initialStatus: markAsPending ? 'pending' : 'unchecked',
+            },
+          })
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add product to room');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Save handler
   const handleSaveDependencies = async () => {
     if (loadingRooms || !selectedRoomId) {
@@ -372,7 +470,7 @@ export function AddDependencyAnywhere() {
               <div>
                 <h2 className="text-base font-bold text-text-primary">+ Add Dependency</h2>
                 <p className="text-xs text-text-secondary mt-0.5">
-                  Pick master catalog items or add custom dependencies to a room
+                  Add products with milestone chains or add custom dependencies to a room
                 </p>
               </div>
               <button
@@ -382,6 +480,32 @@ export function AddDependencyAnywhere() {
                 aria-label="Close"
               >
                 ✕
+              </button>
+            </div>
+
+            {/* Modal Tabs (v3 P5) */}
+            <div className="flex border-b border-border bg-surface-alt/40 px-5 pt-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setModalTab('product')}
+                className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-b-2 transition-all ${
+                  modalTab === 'product'
+                    ? 'border-accent text-accent'
+                    : 'border-transparent text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                <span>📦 Add product to room</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalTab('custom')}
+                className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-b-2 transition-all ${
+                  modalTab === 'custom'
+                    ? 'border-accent text-accent'
+                    : 'border-transparent text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                <span>✏️ Add custom dependency</span>
               </button>
             </div>
 
@@ -436,25 +560,167 @@ export function AddDependencyAnywhere() {
                 </div>
               </div>
 
-              {/* Mark as pending now Toggle */}
-              <div className="rounded-xl border border-border bg-surface-alt/60 p-3.5">
-                <label className="flex items-center justify-between cursor-pointer">
-                  <div>
-                    <span className="text-xs font-bold text-text-primary">Mark as pending now</span>
-                    <p className="text-[11px] text-text-secondary mt-0.5">
-                      New items will immediately show in the Pending list and contractor reminder follow-ups.
-                    </p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={markAsPending}
-                    onChange={(e) => setMarkAsPending(e.target.checked)}
-                    className="h-4 w-4 rounded border-border text-danger focus:ring-danger"
-                  />
-                </label>
-              </div>
+              {/* TAB 1: ADD PRODUCT TO ROOM */}
+              {modalTab === 'product' && (() => {
+                const selectedProd = products.find((p) => p.id === selectedProductId);
+                const steps = productSteps
+                  .filter((s) => s.product_id === selectedProductId)
+                  .sort((a, b) => a.seq - b.seq);
 
-              {/* Master Dependency Catalogue Picker */}
+                return (
+                  <div className="space-y-4">
+                    {/* Product Selection */}
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
+                        Select Product
+                      </label>
+                      <select
+                        value={selectedProductId}
+                        onChange={(e) => {
+                          const newId = e.target.value;
+                          setSelectedProductId(newId);
+                          const p = products.find((prod) => prod.id === newId);
+                          if (p?.location_options && p.location_options.length > 0) {
+                            setSelectedLocation(p.location_options[0]);
+                          } else {
+                            setSelectedLocation('');
+                          }
+                          setCustomLocationText('');
+                        }}
+                        className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold text-text-primary focus:border-accent focus:outline-none"
+                      >
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.title} ({p.scope === 'project' ? 'Project Deliverable' : 'Room Product'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Location & Quantity Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* Location Preset Dropdown */}
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
+                          Location
+                        </label>
+                        {selectedProd?.location_options && selectedProd.location_options.length > 0 ? (
+                          <div className="space-y-2">
+                            <select
+                              value={selectedLocation}
+                              onChange={(e) => setSelectedLocation(e.target.value)}
+                              className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-text-primary focus:border-accent focus:outline-none"
+                            >
+                              {selectedProd.location_options.map((loc) => (
+                                <option key={loc} value={loc}>
+                                  {loc}
+                                </option>
+                              ))}
+                              <option value="__custom__">Custom location…</option>
+                            </select>
+                            {selectedLocation === '__custom__' && (
+                              <input
+                                type="text"
+                                placeholder="Type custom location (e.g. Master Balcony Entrance)"
+                                value={customLocationText}
+                                onChange={(e) => setCustomLocationText(e.target.value)}
+                                className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+                              />
+                            )}
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            placeholder="e.g. Entrance, Beside Bed, Ceiling"
+                            value={customLocationText}
+                            onChange={(e) => setCustomLocationText(e.target.value)}
+                            className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+                          />
+                        )}
+                      </div>
+
+                      {/* Quantity */}
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
+                          Quantity
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={productQuantity}
+                          onChange={(e) => setProductQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-text-primary focus:border-accent focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Optional Note */}
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
+                        Installation Note (optional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Special Italian marble backing box requirement"
+                        value={productNote}
+                        onChange={(e) => setProductNote(e.target.value)}
+                        className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Step Chain Preview */}
+                    <div className="rounded-xl border border-border bg-surface-alt/40 p-3.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
+                          Milestone Chain ({steps.length} steps)
+                        </span>
+                        <span className="text-[10px] text-text-muted italic">
+                          Phase 1 open immediately • Phase 2 unlocks when green steps complete
+                        </span>
+                      </div>
+                      <div className="divide-y divide-border/50 border border-border/60 rounded-lg bg-surface overflow-hidden">
+                        {steps.map((s) => (
+                          <div key={s.id} className="flex items-center gap-2 p-2 text-xs">
+                            {s.sheet_colour && (
+                              <span
+                                className="h-2.5 w-2.5 rounded-full border border-black/15 flex-shrink-0"
+                                style={{ backgroundColor: `#${s.sheet_colour}` }}
+                              />
+                            )}
+                            <span className="flex-1 font-medium text-text-primary truncate">{s.label}</span>
+                            <span className="text-[10px] text-text-secondary">
+                              {s.agency_types?.name ?? s.responsibility}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* TAB 2: CLASSIC CUSTOM DEPENDENCY FORM */}
+              {modalTab === 'custom' && (
+                <div className="space-y-4">
+                  {/* Mark as pending now Toggle */}
+                  <div className="rounded-xl border border-border bg-surface-alt/60 p-3.5">
+                    <label className="flex items-center justify-between cursor-pointer">
+                      <div>
+                        <span className="text-xs font-bold text-text-primary">Mark as pending now</span>
+                        <p className="text-[11px] text-text-secondary mt-0.5">
+                          New items will immediately show in the Pending list and contractor reminder follow-ups.
+                        </p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={markAsPending}
+                        onChange={(e) => setMarkAsPending(e.target.checked)}
+                        className="rounded border-border text-accent focus:ring-accent h-4 w-4"
+                      />
+                    </label>
+                  </div>
+
+                  {/* Master Dependency Catalogue Picker */}
               <div className="space-y-2 border-t border-border/70 pt-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-text-secondary">
@@ -611,14 +877,27 @@ export function AddDependencyAnywhere() {
                 )}
               </div>
             </div>
+          )}
+        </div>
 
             {/* Footer */}
             <div className="flex items-center justify-between border-t border-border/70 bg-surface-alt/40 px-5 py-3">
               <span className="text-xs text-text-secondary">
-                Total:{' '}
-                <strong className="text-text-primary">
-                  {selectedMasterIds.size + customEntries.length} items
-                </strong>
+                {modalTab === 'product' ? (
+                  <>
+                    Target:{' '}
+                    <strong className="text-text-primary">
+                      {rooms.find((r) => r.id === selectedRoomId)?.name ?? 'Selected Room'}
+                    </strong>
+                  </>
+                ) : (
+                  <>
+                    Total:{' '}
+                    <strong className="text-text-primary">
+                      {selectedMasterIds.size + customEntries.length} items
+                    </strong>
+                  </>
+                )}
               </span>
 
               <div className="flex items-center gap-2">
@@ -629,19 +908,30 @@ export function AddDependencyAnywhere() {
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  disabled={
-                    saving ||
-                    loadingRooms ||
-                    !selectedRoomId ||
-                    (selectedMasterIds.size === 0 && customEntries.length === 0)
-                  }
-                  onClick={handleSaveDependencies}
-                  className="rounded-lg bg-accent px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-accent-hover transition-colors disabled:opacity-50"
-                >
-                  {saving ? 'Adding…' : loadingRooms ? 'Loading rooms…' : 'Save Dependencies'}
-                </button>
+                {modalTab === 'product' ? (
+                  <button
+                    type="button"
+                    disabled={saving || loadingRooms || !selectedRoomId || !selectedProductId}
+                    onClick={handleAddProductToRoom}
+                    className="rounded-lg bg-accent px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-accent-hover transition-colors disabled:opacity-50"
+                  >
+                    {saving ? 'Adding…' : loadingRooms ? 'Loading rooms…' : '+ Add Product to Room'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={
+                      saving ||
+                      loadingRooms ||
+                      !selectedRoomId ||
+                      (selectedMasterIds.size === 0 && customEntries.length === 0)
+                    }
+                    onClick={handleSaveDependencies}
+                    className="rounded-lg bg-accent px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-accent-hover transition-colors disabled:opacity-50"
+                  >
+                    {saving ? 'Adding…' : loadingRooms ? 'Loading rooms…' : 'Save Dependencies'}
+                  </button>
+                )}
               </div>
             </div>
           </div>
