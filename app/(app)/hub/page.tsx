@@ -7,6 +7,7 @@ import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
 import { compressImageToWebP } from '@/lib/client/image';
 import { getEscalationLevel, isEscalated, formatEscalationLabel } from '@/lib/client/escalation';
+import { getStepDotColor } from '@/components/room-product-picker';
 import Link from 'next/link';
 
 interface ProjectTile {
@@ -40,7 +41,7 @@ interface Room {
 interface Agency {
   id: string;
   company_name: string;
-  agency_types: { id: string; name: string } | null;
+  agency_types: { id: string; name: string; internal?: boolean } | null;
 }
 
 interface DependencyItem {
@@ -49,6 +50,9 @@ interface DependencyItem {
   room_id: string;
   agency_id: string | null;
   project_dependency_id: string;
+  room_product_id?: string | null;
+  step_id?: string | null;
+  responsibility?: 'external' | 'internal' | 'client' | null;
   status: 'unchecked' | 'pending' | 'complete' | 'na';
   first_raised_on: string | null;
   completed_on: string | null;
@@ -60,9 +64,54 @@ interface DependencyItem {
   project_dependencies: {
     id: string;
     text: string;
-    agency_types: { id: string; name: string } | null;
+    agency_types: { id: string; name: string; internal?: boolean } | null;
   } | null;
   rooms?: { name: string } | null;
+}
+
+interface ItemGateRow {
+  item_id: string;
+  project_id: string;
+  room_id: string;
+  room_product_id: string | null;
+  status: 'unchecked' | 'pending' | 'complete' | 'na';
+  step_id: string;
+  seq: number;
+  label: string;
+  phase: number;
+  responsibility: 'external' | 'internal' | 'client';
+  gate: string;
+  title: string;
+  location: string | null;
+  waits_on_client: boolean;
+  locked: boolean;
+}
+
+interface RoomProduct {
+  id: string;
+  project_id: string;
+  room_id: string;
+  product_id: string;
+  location: string | null;
+  quantity: number;
+  note: string | null;
+  product_catalogue?: {
+    id: string;
+    title: string;
+    scope: string;
+  };
+}
+
+interface ProductStepInfo {
+  id: string;
+  product_id: string;
+  seq: number;
+  label: string;
+  phase: number;
+  responsibility: 'external' | 'internal' | 'client';
+  gate: string;
+  sheet_colour: string | null;
+  default_agency_type_id: string;
 }
 
 interface ItemEvent {
@@ -107,6 +156,14 @@ function HubContent() {
   const [projectAgencies, setProjectAgencies] = useState<Agency[]>([]);
   const [items, setItems] = useState<DependencyItem[]>([]);
   const [collapsedFloors, setCollapsedFloors] = useState<Set<string>>(new Set());
+
+  // Product tracking states (v3)
+  const [roomProducts, setRoomProducts] = useState<RoomProduct[]>([]);
+  const [itemGateRows, setItemGateRows] = useState<ItemGateRow[]>([]);
+  const [productSteps, setProductSteps] = useState<ProductStepInfo[]>([]);
+  const [actionableOnly, setActionableOnly] = useState<boolean>(true);
+  const [collapsedProducts, setCollapsedProducts] = useState<Set<string>>(new Set());
+  const [waitingOnAgencyId, setWaitingOnAgencyId] = useState<string>('');
 
   // Filter states
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'escalated' | 'complete' | 'unchecked' | 'na'>('all');
@@ -251,30 +308,42 @@ function HubContent() {
         { data: rms, error: rErr },
         { data: ags, error: agErr },
         { data: depItems, error: itemsErr },
+        { data: rpData, error: rpErr },
+        { data: gateData, error: gateErr },
+        { data: stepsData, error: stepsErr },
       ] = await Promise.all([
         sb.from('floors').select('id, label, sort').eq('project_id', projId).order('sort'),
         sb.from('rooms').select('id, floor_id, name, sort').eq('project_id', projId).order('sort'),
-        sb.from('agencies').select('id, company_name, agency_types(id, name)').eq('project_id', projId),
+        sb.from('agencies').select('id, company_name, agency_types(id, name, internal)').eq('project_id', projId),
         sb
           .from('dependency_items')
           .select(
-            `id, project_id, room_id, agency_id, project_dependency_id, status, first_raised_on, completed_on, reminder_count, note, photo_path, updated_at,
-             agencies(id, company_name, agency_types(id, name)),
-             project_dependencies(id, text, agency_types(id, name)),
+            `id, project_id, room_id, agency_id, project_dependency_id, room_product_id, step_id, responsibility, status, first_raised_on, completed_on, reminder_count, note, photo_path, updated_at,
+             agencies(id, company_name, agency_types(id, name, internal)),
+             project_dependencies(id, text, agency_types(id, name, internal)),
              rooms(name)`
           )
           .eq('project_id', projId),
+        sb.from('room_products').select('*, product_catalogue(*)').eq('project_id', projId),
+        sb.from('item_gate').select('*').eq('project_id', projId).order('seq'),
+        sb.from('product_steps').select('*').order('seq'),
       ]);
 
       if (fErr) throw fErr;
       if (rErr) throw rErr;
       if (agErr) throw agErr;
       if (itemsErr) throw itemsErr;
+      if (rpErr) throw rpErr;
+      if (gateErr) throw gateErr;
+      if (stepsErr) throw stepsErr;
 
       setFloors(fls ?? []);
       setRooms(rms ?? []);
       setProjectAgencies((ags as unknown as Agency[]) ?? []);
       setItems((depItems as unknown as DependencyItem[]) ?? []);
+      setRoomProducts((rpData as unknown as RoomProduct[]) ?? []);
+      setItemGateRows((gateData as unknown as ItemGateRow[]) ?? []);
+      setProductSteps((stepsData as unknown as ProductStepInfo[]) ?? []);
     } catch (err) {
       console.error('Failed to load project details:', err);
     }
@@ -323,6 +392,7 @@ function HubContent() {
     setStatusNote(item.note ?? '');
     setPhotoFile(null);
     setPhotoPreview(null);
+    setWaitingOnAgencyId(item.agency_id ?? '');
   };
 
   // Handle photo selection in status sheet
@@ -343,6 +413,15 @@ function HubContent() {
       setSavingStatus(true);
       setError(null);
       const sb = supabaseBrowser();
+
+      // If agency was changed in the modal, update dependency_items.agency_id
+      if (waitingOnAgencyId !== (item.agency_id ?? '')) {
+        const { error: agUpdErr } = await sb
+          .from('dependency_items')
+          .update({ agency_id: waitingOnAgencyId || null })
+          .eq('id', item.id);
+        if (agUpdErr) console.warn('Could not update agency_id:', agUpdErr);
+      }
 
       let storagePath: string | null = item.photo_path;
 
@@ -376,6 +455,7 @@ function HubContent() {
           i.id === item.id
             ? {
                 ...i,
+                agency_id: waitingOnAgencyId || null,
                 status: targetStatus,
                 note: statusNote.trim() || null,
                 photo_path: storagePath,
@@ -386,6 +466,11 @@ function HubContent() {
             : i
         )
       );
+
+      // Re-fetch project details so item_gate re-evaluates all locks immediately
+      if (selectedProjectId) {
+        loadProjectDetails(selectedProjectId);
+      }
 
       // Update project tile counts
       setProjects((prev) =>
@@ -405,7 +490,12 @@ function HubContent() {
       setTimeout(() => setNotice(null), 2500);
       setStatusTargetItem(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update item status');
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('locked:')) {
+        setError('Cannot update: finish the external (green) steps of this product first.');
+      } else {
+        setError(msg || 'Failed to update item status');
+      }
     } finally {
       setSavingStatus(false);
     }
@@ -841,10 +931,26 @@ function HubContent() {
                   <option value="unassigned">⚠️ Unassigned ({selectedProjectMetrics.unassigned})</option>
                   {projectAgencies.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.agency_types?.name} – {a.company_name}
+                      {a.agency_types?.name} – {a.company_name} {a.agency_types?.internal ? '[Internal]' : ''}
                     </option>
                   ))}
                 </select>
+
+                {/* Actionable Only Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setActionableOnly(!actionableOnly)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    actionableOnly
+                      ? 'border-accent bg-accent/10 text-accent ring-1 ring-accent/30'
+                      : 'border-border bg-surface text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  <span>{actionableOnly ? '⚡ What’s Actionable Now' : 'Show All Steps'}</span>
+                  <span className="text-[10px] text-text-muted">
+                    {actionableOnly ? '(locked hidden)' : '(incl. locked)'}
+                  </span>
+                </button>
               </div>
 
               {/* Status Counters */}
@@ -861,6 +967,31 @@ function HubContent() {
                   {selectedProjectMetrics.complete} Done
                 </span>
               </div>
+            </div>
+
+            {/* Sheet Colour Key (Legend) */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-surface-alt/70 p-3 rounded-xl border border-border/80 text-[11px] text-text-secondary">
+              <span className="font-bold text-text-primary">Colour Legend:</span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#D9EAD3] border border-[#B7D7B0]" />
+                <span>green = Other agencies</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#C9DAF8] border border-[#A4C2F4]" />
+                <span>blue = Other agencies (after greens)</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#E06666] border border-[#CC0000]" />
+                <span>dark red = Installers</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#F4CCCC] border border-[#EA9999]" />
+                <span>light red = Programmers</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#F9CB9C] border border-[#F6B26B]" />
+                <span>orange = Project managers</span>
+              </span>
             </div>
           </div>
         )}
@@ -929,17 +1060,12 @@ function HubContent() {
                         <p className="text-xs text-text-muted italic py-2">No rooms on this floor.</p>
                       ) : (
                         floorRooms.map((room) => {
+                          const roomProds = roomProducts.filter((rp) => rp.room_id === room.id);
                           const roomItems = floorItems.filter((i) => i.room_id === room.id);
-                          if (statusFilter !== 'all' && roomItems.length === 0) return null;
+                          const productItemIds = new Set(itemGateRows.map((g) => g.item_id));
+                          const otherItems = roomItems.filter((i) => !i.room_product_id && !productItemIds.has(i.id));
 
-                          // Group room items by Agency / Trade
-                          const agencyGroups = new Map<string, { agency: Agency | null; items: DependencyItem[] }>();
-                          roomItems.forEach((item) => {
-                            const key = item.agency_id ?? 'unassigned';
-                            const existing = agencyGroups.get(key) ?? { agency: item.agencies, items: [] };
-                            existing.items.push(item);
-                            agencyGroups.set(key, existing);
-                          });
+                          if (statusFilter !== 'all' && roomItems.length === 0 && roomProds.length === 0) return null;
 
                           return (
                             <div key={room.id} className="rounded-xl border border-border bg-surface-alt/30 p-3.5 space-y-3">
@@ -948,7 +1074,7 @@ function HubContent() {
                                 <div className="flex items-center gap-2">
                                   <h4 className="text-sm font-bold text-text-primary">{room.name}</h4>
                                   <span className="text-[11px] text-text-muted font-mono">
-                                    ({roomItems.length} deps)
+                                    ({roomProds.length > 0 ? `${roomProds.length} products · ` : ''}{roomItems.length} deps)
                                   </span>
                                 </div>
 
@@ -956,176 +1082,511 @@ function HubContent() {
                                   href={`/projects/${selectedProjectId}/rooms/${room.id}/dependencies`}
                                   className="text-xs font-semibold text-accent hover:underline inline-flex items-center gap-0.5"
                                 >
-                                  + Add/Edit Deps
+                                  + Add/Edit Products &amp; Deps
                                 </Link>
                               </div>
 
-                              {/* Dependencies Table/List */}
-                              {roomItems.length === 0 ? (
-                                <p className="text-xs text-text-muted italic py-1">No dependencies added to this room yet.</p>
-                              ) : (
-                                <div className="space-y-2">
-                                  {Array.from(agencyGroups.entries()).map(([key, group]) => {
-                                    const agencyName = group.agency?.company_name
-                                      ? `${group.agency.agency_types?.name ?? ''} – ${group.agency.company_name}`
-                                      : null;
+                              {/* ── 1. ROOM PRODUCTS (v3) ── */}
+                              {roomProds.length > 0 && (
+                                <div className="space-y-3">
+                                  {roomProds.map((rp) => {
+                                    const prodGateRows = itemGateRows.filter((g) => g.room_product_id === rp.id);
+
+                                    // Filter steps according to active agency and status filters
+                                    const matchingGateRows = prodGateRows.filter((g) => {
+                                      if (agencyFilter !== 'all') {
+                                        const itm = items.find((i) => i.id === g.item_id);
+                                        if (agencyFilter === 'unassigned' && itm?.agency_id !== null) return false;
+                                        if (agencyFilter !== 'unassigned' && itm?.agency_id !== agencyFilter) return false;
+                                      }
+                                      if (statusFilter !== 'all') {
+                                        const l2 = selectedProject?.l2_after ?? 3;
+                                        const itm = items.find((i) => i.id === g.item_id);
+                                        const isEsc = itm?.status === 'pending' && isEscalated(itm?.reminder_count ?? 0, l2);
+                                        if (statusFilter === 'escalated') return isEsc;
+                                        if (statusFilter === 'pending') return g.status === 'pending' && !isEsc;
+                                        return g.status === statusFilter;
+                                      }
+                                      return true;
+                                    });
+
+                                    // Skip product if a filter is active and nothing matches
+                                    if ((statusFilter !== 'all' || agencyFilter !== 'all') && matchingGateRows.length === 0) {
+                                      return null;
+                                    }
+
+                                    const isProductCollapsed = collapsedProducts.has(rp.id);
+                                    const completedStepsCount = prodGateRows.filter((g) => g.status === 'complete' || g.status === 'na').length;
+                                    const totalStepsCount = prodGateRows.length;
+
+                                    // Visible steps based on actionableOnly toggle
+                                    const visibleSteps = prodGateRows.filter((g) => {
+                                      if (actionableOnly && g.locked) return false;
+                                      if (statusFilter !== 'all' || agencyFilter !== 'all') {
+                                        return matchingGateRows.some((m) => m.item_id === g.item_id);
+                                      }
+                                      return true;
+                                    });
+
+                                    // Open green steps for unlock reasons
+                                    const openGreenSteps = prodGateRows.filter(
+                                      (g) => g.phase === 1 && g.status !== 'complete' && g.status !== 'na'
+                                    );
+                                    const unlockReason =
+                                      openGreenSteps.length > 0
+                                        ? openGreenSteps.map((g) => g.label).join(', ')
+                                        : 'external green steps';
 
                                     return (
-                                      <div key={key} className="space-y-1.5">
-                                        {/* Contractor Sub-header */}
-                                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-text-secondary">
-                                          {agencyName ? (
-                                            <span>Contractor: {agencyName}</span>
-                                          ) : (
-                                            <span className="text-danger font-bold">⚠️ Unassigned Trade</span>
-                                          )}
+                                      <div
+                                        key={rp.id}
+                                        className="rounded-xl border border-border bg-surface overflow-hidden shadow-2xs"
+                                      >
+                                        {/* Product Card Header with Progress Bar */}
+                                        <div
+                                          onClick={() => {
+                                            setCollapsedProducts((prev) => {
+                                              const next = new Set(prev);
+                                              if (next.has(rp.id)) next.delete(rp.id);
+                                              else next.add(rp.id);
+                                              return next;
+                                            });
+                                          }}
+                                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-surface hover:bg-surface-alt/50 transition-colors cursor-pointer select-none border-b border-border/60"
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <svg
+                                              className={`h-3.5 w-3.5 text-text-muted transition-transform ${isProductCollapsed ? '' : 'rotate-90'}`}
+                                              fill="none"
+                                              viewBox="0 0 24 24"
+                                              stroke="currentColor"
+                                              strokeWidth={2.5}
+                                            >
+                                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                            </svg>
+                                            <h5 className="text-sm font-bold text-text-primary">
+                                              {rp.product_catalogue?.title ?? 'Product'}
+                                              {rp.location && (
+                                                <span className="ml-1.5 font-normal text-text-secondary">
+                                                  · {rp.location}
+                                                </span>
+                                              )}
+                                            </h5>
+                                            {rp.quantity > 1 && (
+                                              <span className="rounded bg-accent/10 px-1.5 py-0.2 text-[10px] font-bold text-accent">
+                                                Qty: {rp.quantity}
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          {/* Step Progress Bar */}
+                                          <div className="flex items-center gap-3">
+                                            <div className="flex items-center gap-1 w-32 sm:w-44">
+                                              {prodGateRows.map((st) => {
+                                                const stepInfo = productSteps.find((ps) => ps.id === st.step_id);
+                                                const col = getStepDotColor(stepInfo?.sheet_colour);
+                                                const isDone = st.status === 'complete' || st.status === 'na';
+                                                return (
+                                                  <div
+                                                    key={st.item_id}
+                                                    title={`Step ${st.seq}: ${st.label} (${st.status.toUpperCase()}) - ${col.label}`}
+                                                    className="h-2 flex-1 rounded-sm border transition-all"
+                                                    style={{
+                                                      backgroundColor: isDone ? col.bg : 'transparent',
+                                                      borderColor: col.border,
+                                                      opacity: isDone ? 1 : 0.35,
+                                                    }}
+                                                  />
+                                                );
+                                              })}
+                                            </div>
+                                            <span className="text-[11px] font-semibold text-text-secondary min-w-[55px] text-right">
+                                              {completedStepsCount}/{totalStepsCount} done
+                                            </span>
+                                          </div>
                                         </div>
 
-                                        {/* Items in this contractor group */}
-                                        <div className="divide-y divide-border/60 rounded-lg border border-border bg-surface overflow-hidden">
-                                          {group.items.map((item) => {
-                                            const l2 = selectedProject?.l2_after ?? 3;
-                                            const l3 = selectedProject?.l3_after ?? 6;
-                                            const escalated = item.status === 'pending' && isEscalated(item.reminder_count, l2);
-                                            const escLevel = getEscalationLevel(item.reminder_count, l2, l3);
-
-                                            return (
-                                              <div
-                                                key={item.id}
-                                                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 hover:bg-surface-alt/40 transition-colors"
-                                              >
-                                                {/* Left Column: Text & Badges */}
-                                                <div className="min-w-0 flex-1 space-y-1">
-                                                  <div className="flex flex-wrap items-center gap-2">
-                                                    <p className="text-xs font-semibold text-text-primary">
-                                                      {item.project_dependencies?.text ?? 'Dependency item'}
-                                                    </p>
-
-                                                    {/* Status Badge */}
-                                                    <span
-                                                      className={`inline-flex items-center rounded px-1.5 py-0.2 text-[10px] font-bold ${
-                                                        item.status === 'complete'
-                                                          ? 'bg-success-light text-success'
-                                                          : item.status === 'pending'
-                                                          ? escalated
-                                                            ? 'bg-danger-light text-danger'
-                                                            : 'bg-warning-light text-warning'
-                                                          : item.status === 'na'
-                                                          ? 'bg-surface-alt text-text-muted'
-                                                          : 'bg-surface-alt text-text-secondary'
-                                                      }`}
-                                                    >
-                                                      {item.status === 'pending' && escalated
-                                                        ? escLevel === 3
-                                                          ? 'L3 ESCALATION'
-                                                          : 'L2 ESCALATION'
-                                                        : item.status.toUpperCase()}
-                                                    </span>
-
-                                                    {/* Unassigned Warning Badge */}
-                                                    {!item.agency_id && (
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => setAssignTargetItem(item)}
-                                                        className="rounded bg-danger-light px-1.5 py-0.2 text-[10px] font-bold text-danger hover:underline"
-                                                      >
-                                                        No agency • Assign
-                                                      </button>
-                                                    )}
-                                                  </div>
-
-                                                  {/* History & Notes metadata line */}
-                                                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-secondary">
-                                                    {item.first_raised_on && (
-                                                      <span>Raised: {formatDate(item.first_raised_on)}</span>
-                                                    )}
-                                                    {item.reminder_count > 0 && (
-                                                      <span className="rounded bg-warning-light px-1 py-0.2 text-[10px] font-bold text-warning font-mono">
-                                                        {item.reminder_count} chased
-                                                      </span>
-                                                    )}
-                                                    {item.completed_on && (
-                                                      <span className="text-success font-medium">
-                                                        Completed: {formatDate(item.completed_on)}
-                                                      </span>
-                                                    )}
-
-                                                    {/* Note Preview */}
-                                                    {item.note && (
-                                                      <span className="text-text-primary bg-surface-alt px-1.5 py-0.5 rounded border border-border truncate max-w-xs">
-                                                        📝 {item.note}
-                                                      </span>
-                                                    )}
-
-                                                    {/* Photo Thumbnail / Viewer */}
-                                                    {item.photo_path && (
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => viewItemPhoto(item.photo_path!)}
-                                                        className="text-accent hover:underline flex items-center gap-0.5 font-medium"
-                                                      >
-                                                        📷 Photo
-                                                      </button>
-                                                    )}
-
-                                                    {/* History Drawer Trigger */}
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => openHistoryDrawer(item)}
-                                                      className="text-text-muted hover:text-text-primary hover:underline ml-1"
-                                                    >
-                                                      History
-                                                    </button>
-                                                  </div>
-                                                </div>
-
-                                                {/* Right Column: 3 Action Buttons (Done / Pending / N.A.) */}
-                                                <div className="flex items-center gap-1.5 shrink-0">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => openStatusSheet(item, 'complete')}
-                                                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
-                                                      item.status === 'complete'
-                                                        ? 'bg-success text-white shadow-xs ring-2 ring-success/30'
-                                                        : 'bg-surface border border-border text-text-secondary hover:border-success hover:text-success'
-                                                    }`}
-                                                  >
-                                                    ✓ Done
-                                                  </button>
-
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => openStatusSheet(item, 'pending')}
-                                                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
-                                                      item.status === 'pending'
-                                                        ? 'bg-warning text-white shadow-xs ring-2 ring-warning/30'
-                                                        : 'bg-surface border border-border text-text-secondary hover:border-warning hover:text-warning'
-                                                    }`}
-                                                  >
-                                                    ⏳ Pending
-                                                  </button>
-
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => openStatusSheet(item, 'na')}
-                                                    className={`rounded-lg px-2 py-1 text-xs font-bold transition-all ${
-                                                      item.status === 'na'
-                                                        ? 'bg-text-secondary text-white shadow-xs ring-2 ring-text-secondary/30'
-                                                        : 'bg-surface border border-border text-text-muted hover:border-text-secondary hover:text-text-primary'
-                                                    }`}
-                                                  >
-                                                    N.A.
-                                                  </button>
-                                                </div>
+                                        {/* Product Steps List (When Expanded) */}
+                                        {!isProductCollapsed && (
+                                          <div className="divide-y divide-border/60 bg-surface">
+                                            {visibleSteps.length === 0 ? (
+                                              <div className="p-3 text-center text-xs text-text-muted italic">
+                                                {actionableOnly && prodGateRows.some((g) => g.locked)
+                                                  ? `All remaining steps are locked waiting on: ${unlockReason}. Toggle "Show all steps" to inspect.`
+                                                  : 'No steps match current filters.'}
                                               </div>
-                                            );
-                                          })}
-                                        </div>
+                                            ) : (
+                                              visibleSteps.map((st) => {
+                                                const item = items.find((i) => i.id === st.item_id);
+                                                const stepInfo = productSteps.find((ps) => ps.id === st.step_id);
+                                                const col = getStepDotColor(stepInfo?.sheet_colour);
+                                                const l2 = selectedProject?.l2_after ?? 3;
+                                                const l3 = selectedProject?.l3_after ?? 6;
+                                                const escalated = item?.status === 'pending' && isEscalated(item?.reminder_count ?? 0, l2);
+                                                const escLevel = getEscalationLevel(item?.reminder_count ?? 0, l2, l3);
+                                                const isLocked = st.locked;
+
+                                                const assignedAgency = item?.agencies;
+                                                const isInternal = st.responsibility === 'internal';
+
+                                                return (
+                                                  <div
+                                                    key={st.item_id}
+                                                    className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 transition-colors ${
+                                                      isLocked ? 'bg-surface-alt/40 opacity-70' : 'hover:bg-surface-alt/30'
+                                                    }`}
+                                                  >
+                                                    {/* Left: Step dot, Seq, Label, Owner badge, Status badge */}
+                                                    <div className="min-w-0 flex-1 space-y-1">
+                                                      <div className="flex flex-wrap items-center gap-2">
+                                                        {/* Sheet colour dot */}
+                                                        <span
+                                                          title={col.label}
+                                                          className="inline-block h-3 w-3 rounded-full border shadow-2xs shrink-0 cursor-help"
+                                                          style={{
+                                                            backgroundColor: col.bg,
+                                                            borderColor: col.border,
+                                                          }}
+                                                        />
+
+                                                        <p className="text-xs font-semibold text-text-primary">
+                                                          <span className="text-text-muted font-mono mr-1">#{st.seq}</span>
+                                                          {st.label}
+                                                        </p>
+
+                                                        {/* Owner badge */}
+                                                        {st.waits_on_client ? (
+                                                          <span className="rounded bg-amber-500/10 text-amber-700 border border-amber-500/20 px-1.5 py-0.2 text-[10px] font-bold">
+                                                            Client
+                                                          </span>
+                                                        ) : assignedAgency ? (
+                                                          <span className="rounded bg-surface-alt border border-border px-1.5 py-0.2 text-[10px] font-semibold text-text-secondary">
+                                                            {assignedAgency.company_name}
+                                                            {assignedAgency.agency_types?.internal && (
+                                                              <span className="ml-1 text-[9px] font-bold text-accent">[Internal]</span>
+                                                            )}
+                                                          </span>
+                                                        ) : (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => item && setAssignTargetItem(item)}
+                                                            className="rounded bg-danger-light px-1.5 py-0.2 text-[10px] font-bold text-danger hover:underline"
+                                                          >
+                                                            {isInternal ? 'VTech Team' : 'Contractor'} • Assign
+                                                          </button>
+                                                        )}
+
+                                                        {/* Status badge */}
+                                                        <span
+                                                          className={`inline-flex items-center rounded px-1.5 py-0.2 text-[10px] font-bold ${
+                                                            st.status === 'complete'
+                                                              ? 'bg-success-light text-success'
+                                                              : st.status === 'pending'
+                                                              ? escalated
+                                                                ? 'bg-danger-light text-danger'
+                                                                : 'bg-warning-light text-warning'
+                                                              : st.status === 'na'
+                                                              ? 'bg-surface-alt text-text-muted'
+                                                              : 'bg-surface-alt text-text-secondary'
+                                                          }`}
+                                                        >
+                                                          {st.status === 'pending' && escalated
+                                                            ? escLevel === 3
+                                                              ? 'L3 ESCALATION'
+                                                              : 'L2 ESCALATION'
+                                                            : st.status.toUpperCase()}
+                                                        </span>
+
+                                                        {/* Locked badge if step is locked */}
+                                                        {isLocked && (
+                                                          <span
+                                                            title={`Finish external (green) steps first: ${unlockReason}`}
+                                                            className="inline-flex items-center gap-1 rounded bg-surface border border-border px-1.5 py-0.2 text-[10px] font-medium text-text-muted italic"
+                                                          >
+                                                            🔒 Locked · Unlocks after: {unlockReason}
+                                                          </span>
+                                                        )}
+                                                      </div>
+
+                                                      {/* Metadata line: First raised, note, photo, history */}
+                                                      {item && (
+                                                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-secondary">
+                                                          {item.first_raised_on && (
+                                                            <span>Raised: {formatDate(item.first_raised_on)}</span>
+                                                          )}
+                                                          {item.reminder_count > 0 && (
+                                                            <span className="rounded bg-warning-light px-1 py-0.2 text-[10px] font-bold text-warning font-mono">
+                                                              {item.reminder_count} chased
+                                                            </span>
+                                                          )}
+                                                          {item.completed_on && (
+                                                            <span className="text-success font-medium">
+                                                              Done: {formatDate(item.completed_on)}
+                                                            </span>
+                                                          )}
+                                                          {item.note && (
+                                                            <span className="text-text-primary bg-surface-alt px-1.5 py-0.5 rounded border border-border truncate max-w-xs">
+                                                              📝 {item.note}
+                                                            </span>
+                                                          )}
+                                                          {item.photo_path && (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => viewItemPhoto(item.photo_path!)}
+                                                              className="text-accent hover:underline flex items-center gap-0.5 font-medium"
+                                                            >
+                                                              📷 Photo
+                                                            </button>
+                                                          )}
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => openHistoryDrawer(item)}
+                                                            className="text-text-muted hover:text-text-primary hover:underline ml-1"
+                                                          >
+                                                            History
+                                                          </button>
+                                                        </div>
+                                                      )}
+                                                    </div>
+
+                                                    {/* Right: Actions */}
+                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                      {isLocked ? (
+                                                        <span
+                                                          title="Locked until green external steps complete"
+                                                          className="text-[11px] font-semibold text-text-muted px-2 py-1 rounded bg-surface-alt border border-border cursor-not-allowed"
+                                                        >
+                                                          🔒 Locked
+                                                        </span>
+                                                      ) : (
+                                                        item && (
+                                                          <>
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => openStatusSheet(item, 'complete')}
+                                                              className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                                                                item.status === 'complete'
+                                                                  ? 'bg-success text-white shadow-xs ring-2 ring-success/30'
+                                                                  : 'bg-surface border border-border text-text-secondary hover:border-success hover:text-success'
+                                                              }`}
+                                                            >
+                                                              ✓ Done
+                                                            </button>
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => openStatusSheet(item, 'pending')}
+                                                              className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                                                                item.status === 'pending'
+                                                                  ? 'bg-warning text-white shadow-xs ring-2 ring-warning/30'
+                                                                  : 'bg-surface border border-border text-text-secondary hover:border-warning hover:text-warning'
+                                                              }`}
+                                                            >
+                                                              ⏳ Pending
+                                                            </button>
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => openStatusSheet(item, 'na')}
+                                                              className={`rounded-lg px-2 py-1 text-xs font-bold transition-all ${
+                                                                item.status === 'na'
+                                                                  ? 'bg-text-secondary text-white shadow-xs ring-2 ring-text-secondary/30'
+                                                                  : 'bg-surface border border-border text-text-muted hover:border-text-secondary hover:text-text-primary'
+                                                              }`}
+                                                            >
+                                                              N.A.
+                                                            </button>
+                                                          </>
+                                                        )
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })
+                                            )}
+                                          </div>
+                                        )}
                                       </div>
                                     );
                                   })}
                                 </div>
                               )}
+
+                              {/* ── 2. OTHER DEPENDENCIES (Legacy master list / custom) ── */}
+                              {otherItems.length > 0 && (() => {
+                                // Group room items by Agency / Trade
+                                const agencyGroups = new Map<string, { agency: Agency | null; items: DependencyItem[] }>();
+                                otherItems.forEach((item) => {
+                                  const key = item.agency_id ?? 'unassigned';
+                                  const existing = agencyGroups.get(key) ?? { agency: item.agencies, items: [] };
+                                  existing.items.push(item);
+                                  agencyGroups.set(key, existing);
+                                });
+
+                                return (
+                                  <div className="space-y-2 pt-2 border-t border-border/60">
+                                    <h5 className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                                      Other Dependencies ({otherItems.length})
+                                    </h5>
+                                    <div className="space-y-2">
+                                      {Array.from(agencyGroups.entries()).map(([key, group]) => {
+                                        const agencyName = group.agency?.company_name
+                                          ? `${group.agency.agency_types?.name ?? ''} – ${group.agency.company_name}`
+                                          : null;
+
+                                        return (
+                                          <div key={key} className="space-y-1.5">
+                                            {/* Contractor Sub-header */}
+                                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-text-secondary">
+                                              {agencyName ? (
+                                                <span>Contractor: {agencyName}</span>
+                                              ) : (
+                                                <span className="text-danger font-bold">⚠️ Unassigned Trade</span>
+                                              )}
+                                            </div>
+
+                                            {/* Items in this contractor group */}
+                                            <div className="divide-y divide-border/60 rounded-lg border border-border bg-surface overflow-hidden">
+                                              {group.items.map((item) => {
+                                                const l2 = selectedProject?.l2_after ?? 3;
+                                                const l3 = selectedProject?.l3_after ?? 6;
+                                                const escalated = item.status === 'pending' && isEscalated(item.reminder_count, l2);
+                                                const escLevel = getEscalationLevel(item.reminder_count, l2, l3);
+
+                                                return (
+                                                  <div
+                                                    key={item.id}
+                                                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 hover:bg-surface-alt/40 transition-colors"
+                                                  >
+                                                    {/* Left Column: Text & Badges */}
+                                                    <div className="min-w-0 flex-1 space-y-1">
+                                                      <div className="flex flex-wrap items-center gap-2">
+                                                        <p className="text-xs font-semibold text-text-primary">
+                                                          {item.project_dependencies?.text ?? 'Dependency item'}
+                                                        </p>
+
+                                                        {/* Status Badge */}
+                                                        <span
+                                                          className={`inline-flex items-center rounded px-1.5 py-0.2 text-[10px] font-bold ${
+                                                            item.status === 'complete'
+                                                              ? 'bg-success-light text-success'
+                                                              : item.status === 'pending'
+                                                              ? escalated
+                                                                ? 'bg-danger-light text-danger'
+                                                                : 'bg-warning-light text-warning'
+                                                              : item.status === 'na'
+                                                              ? 'bg-surface-alt text-text-muted'
+                                                              : 'bg-surface-alt text-text-secondary'
+                                                          }`}
+                                                        >
+                                                          {item.status === 'pending' && escalated
+                                                            ? escLevel === 3
+                                                              ? 'L3 ESCALATION'
+                                                              : 'L2 ESCALATION'
+                                                            : item.status.toUpperCase()}
+                                                        </span>
+
+                                                        {/* Unassigned Warning Badge */}
+                                                        {!item.agency_id && (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => setAssignTargetItem(item)}
+                                                            className="rounded bg-danger-light px-1.5 py-0.2 text-[10px] font-bold text-danger hover:underline"
+                                                          >
+                                                            No agency • Assign
+                                                          </button>
+                                                        )}
+                                                      </div>
+
+                                                      {/* History & Notes metadata line */}
+                                                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-secondary">
+                                                        {item.first_raised_on && (
+                                                          <span>Raised: {formatDate(item.first_raised_on)}</span>
+                                                        )}
+                                                        {item.reminder_count > 0 && (
+                                                          <span className="rounded bg-warning-light px-1 py-0.2 text-[10px] font-bold text-warning font-mono">
+                                                            {item.reminder_count} chased
+                                                          </span>
+                                                        )}
+                                                        {item.completed_on && (
+                                                          <span className="text-success font-medium">
+                                                            Completed: {formatDate(item.completed_on)}
+                                                          </span>
+                                                        )}
+
+                                                        {item.note && (
+                                                          <span className="text-text-primary bg-surface-alt px-1.5 py-0.5 rounded border border-border truncate max-w-xs">
+                                                            📝 {item.note}
+                                                          </span>
+                                                        )}
+
+                                                        {item.photo_path && (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => viewItemPhoto(item.photo_path!)}
+                                                            className="text-accent hover:underline flex items-center gap-0.5 font-medium"
+                                                          >
+                                                            📷 Photo
+                                                          </button>
+                                                        )}
+
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => openHistoryDrawer(item)}
+                                                          className="text-text-muted hover:text-text-primary hover:underline ml-1"
+                                                        >
+                                                          History
+                                                        </button>
+                                                      </div>
+                                                    </div>
+
+                                                    {/* Right Column: 3 Action Buttons (Done / Pending / N.A.) */}
+                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => openStatusSheet(item, 'complete')}
+                                                        className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                                                          item.status === 'complete'
+                                                            ? 'bg-success text-white shadow-xs ring-2 ring-success/30'
+                                                            : 'bg-surface border border-border text-text-secondary hover:border-success hover:text-success'
+                                                        }`}
+                                                      >
+                                                        ✓ Done
+                                                      </button>
+
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => openStatusSheet(item, 'pending')}
+                                                        className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                                                          item.status === 'pending'
+                                                            ? 'bg-warning text-white shadow-xs ring-2 ring-warning/30'
+                                                            : 'bg-surface border border-border text-text-secondary hover:border-warning hover:text-warning'
+                                                        }`}
+                                                      >
+                                                        ⏳ Pending
+                                                      </button>
+
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => openStatusSheet(item, 'na')}
+                                                        className={`rounded-lg px-2 py-1 text-xs font-bold transition-all ${
+                                                          item.status === 'na'
+                                                            ? 'bg-text-secondary text-white shadow-xs ring-2 ring-text-secondary/30'
+                                                            : 'bg-surface border border-border text-text-muted hover:border-text-secondary hover:text-text-primary'
+                                                        }`}
+                                                      >
+                                                        N.A.
+                                                      </button>
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           );
                         })
@@ -1176,6 +1637,38 @@ function HubContent() {
                   ×
                 </button>
               </div>
+
+              {/* Waiting on Agency Selector (Pending) */}
+              {statusTargetItem.targetStatus === 'pending' && (() => {
+                const isInternal =
+                  statusTargetItem.item.responsibility === 'internal' ||
+                  itemGateRows.find((g) => g.item_id === statusTargetItem.item.id)?.responsibility === 'internal';
+
+                const availableAgencies = projectAgencies.filter((a) => {
+                  const isAgInternal = Boolean(a.agency_types?.internal);
+                  return isInternal ? isAgInternal : !isAgInternal;
+                });
+
+                return (
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-text-secondary mb-1">
+                      Waiting on ({isInternal ? 'Internal VTech Team' : 'External Contractor'})
+                    </label>
+                    <select
+                      value={waitingOnAgencyId}
+                      onChange={(e) => setWaitingOnAgencyId(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary focus:border-accent"
+                    >
+                      <option value="">Select contractor / team…</option>
+                      {availableAgencies.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.agency_types?.name} – {a.company_name} {a.agency_types?.internal ? '[Internal]' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })()}
 
               {/* Date Input */}
               <div>
