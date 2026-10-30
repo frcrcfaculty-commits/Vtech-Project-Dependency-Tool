@@ -74,7 +74,8 @@ test('wizard: 1 floor by default → room picker adds 5 master + 1 custom', asyn
 
   // Agency with an L1 contact (email + WhatsApp)
   await page.getByRole('button', { name: /next: agencies/i }).click();
-  await page.getByRole('button', { name: '+ Add Agency' }).click();
+  // v3 (P1) split agencies into External / Internal team: accept both the old and new button names.
+  await page.getByRole('button', { name: /^\+ Add (External )?Agency$/ }).click();
   await page.locator('select').filter({ hasText: 'Select type' }).first().selectOption({ label: 'Electrician' });
   await page.getByPlaceholder('e.g. Omkar Electricals').fill('E2E UI Sparks');
   await page.getByPlaceholder('Contact Name').fill('UI Elec L1');
@@ -85,6 +86,9 @@ test('wizard: 1 floor by default → room picker adds 5 master + 1 custom', asyn
 
   // Room-by-room picker: 5 master + 1 custom
   await page.getByRole('button', { name: /next: dependencies/i }).click();
+  // v3 (P2): step 4 opens on the product picker; this spec covers the v2 master-list picker, which stays behind a toggle.
+  const classic = page.getByRole('button', { name: 'Use master dependency list (classic)' }).first();
+  if (await classic.isVisible()) await classic.click();
   await expect(page.getByRole('heading', { name: /configuring: living room/i })).toBeVisible();
   for (const t of MASTER) await page.getByRole('checkbox', { name: t }).check();
   const customBox = page.getByPlaceholder(/italian marble/i);
@@ -133,6 +137,9 @@ test('"+ Add dependency" from the Pending page adds a new item already pending (
   await page.goto('/pending');
   await page.getByRole('button', { name: 'Add dependency' }).click();
   await expect(page.getByRole('heading', { name: '+ Add Dependency' })).toBeVisible();
+  // v3 (P5): the modal opens on "Add product to room"; master-list items live under the custom tab.
+  const customTab = page.getByRole('button', { name: /add custom dependency/i });
+  if (await customTab.isVisible()) await customTab.click();
   const modal = page.getByRole('heading', { name: '+ Add Dependency' }).locator('xpath=ancestor::div[.//button[normalize-space(.)="Save Dependencies"]][1]');
   await modal.locator('select').filter({ has: page.locator('option', { hasText: NAME }) }).selectOption({ label: NAME });
   // The room dropdown updates asynchronously after the project changes; saving earlier writes to the previous
@@ -195,7 +202,8 @@ test('Pending list: select 2 items → Send reminders → review & send has only
   await page.goto('/pending');
   // The same master texts are pending in the Demo projects too: narrow the list with the page's project filter.
   await page.locator('select').filter({ has: page.locator('option', { hasText: /All Projects/ }) }).selectOption(projectId);
-  for (const t of [MASTER[0], ON_THE_GO]) await page.getByRole('checkbox', { name: `Select dependency: ${t}` }).check();
+  // v3 (P4) labels rows "Room · text".
+  for (const t of [MASTER[0], ON_THE_GO]) await page.getByRole('checkbox', { name: new RegExp(`^Select dependency: (Living Room · )?${t.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}$`) }).check();
   await page.getByRole('button', { name: /send reminders \(2\)/i }).click();
   await page.waitForURL(/\/visits\/[0-9a-f-]{36}\/dispatches$/);
   const visitId = page.url().split('/visits/')[1].split('/')[0];
