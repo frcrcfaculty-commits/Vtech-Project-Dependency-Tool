@@ -152,6 +152,7 @@ test('S5 site visit: sign in, start visit, mark Done (dated) / Pending (photo) /
 
 test('S6 review & send: drafts per agency, send email (dryrun), open WhatsApp + confirm, counts +1 exactly', async () => {
   test.skip(!visitId, 'S5 did not create a visit');
+  test.setTimeout(240_000); // one send + confirm round trip per agency on the Demo project; 60 s is not enough for all of them
   await expect(page.getByRole('button', { name: /send all emails/i })).toBeVisible();
 
   // Drafts: one WhatsApp per agency with pending items; one email where the target (L1) level has an email contact.

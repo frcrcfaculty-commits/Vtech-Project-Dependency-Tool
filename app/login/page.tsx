@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { supabaseBrowser } from '@/lib/client/supabase';
+import { VTechLogo } from '@/components/vtech-logo';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -36,23 +37,31 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-surface-alt px-4 py-8">
-      <div className="w-full max-w-sm">
+    <div className="brand-band relative flex min-h-dvh items-center justify-center overflow-hidden px-4 py-8">
+      {/* Diagonal light panes, as in VTech's own artwork */}
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div className="absolute -left-1/4 top-[12%] h-56 w-[150%] -rotate-[14deg] bg-white/[0.07]" />
+        <div className="absolute -left-1/4 top-[38%] h-24 w-[150%] -rotate-[14deg] bg-white/[0.05]" />
+        <div className="absolute -right-1/4 bottom-[6%] h-72 w-[120%] rotate-[22deg] bg-white/[0.06]" />
+      </div>
+
+      <div className="relative w-full max-w-sm">
         {/* Branding header */}
         <div className="mb-8 text-center">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-accent text-white font-bold text-xl shadow-xs mb-3">
-            V
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-            VTech Site Tracker
+          <VTechLogo tone="white" className="mx-auto h-10 w-auto drop-shadow-[0_6px_18px_rgba(10,0,60,0.35)]" />
+          <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/75">
+            Leading the technology curve
+          </p>
+          <h1 className="mt-6 text-2xl font-bold tracking-tight text-white">
+            Site Tracker
           </h1>
-          <p className="mt-1 text-sm text-text-secondary">
+          <p className="mt-1 text-sm text-white/80">
             Sign in to track site dependencies &amp; visits
           </p>
         </div>
 
         {/* Card */}
-        <div className="rounded-2xl border border-border bg-surface p-6 shadow-xs">
+        <div className="rounded-2xl border border-white/60 bg-white/80 p-6 shadow-[0_30px_60px_-20px_rgba(10,0,60,0.55)] backdrop-blur-xl">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-xs font-semibold uppercase tracking-wider text-text-secondary mb-1.5">
@@ -119,7 +128,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <div className="mt-6 text-center text-xs text-text-muted space-y-1">
+        <div className="mt-6 text-center text-xs text-white/75 space-y-1">
           <p>Temporary password? Sign in, then change it in your profile menu.</p>
           <p>Accounts are provisioned by VTech administrators.</p>
         </div>

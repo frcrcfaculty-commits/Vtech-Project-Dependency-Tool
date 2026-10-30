@@ -6,6 +6,16 @@
 import 'regenerator-runtime/runtime.js';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { VTECH_WORDMARK_PATH, VTECH_WORDMARK_VIEWBOX } from '../brand';
+
+/** VTech wordmark (vector, brand violet) with its top-right corner at (right, top). Returns the drawn width. */
+export function drawLogo(page: PDFPage, right: number, top: number, height = 16): number {
+  const [vx, vy, vw, vh] = VTECH_WORDMARK_VIEWBOX.split(' ').map(Number);
+  const s = height / vh;
+  // drawSvgPath maps SVG y (downwards) from the given origin, so the origin is the viewBox's (0,0) point.
+  page.drawSvgPath(VTECH_WORDMARK_PATH, { x: right - (vx + vw) * s, y: top + vy * s, scale: s, color: rgb(0x4a / 255, 0x17 / 255, 0xd0 / 255) });
+  return vw * s;
+}
 
 export interface PdfRow {
   floorLabel: string; floorSort: number;
@@ -175,6 +185,7 @@ export async function buildPendingPdf(input: PdfInput, fonts: PdfFonts): Promise
 
   // Title block
   newPage();
+  drawLogo(page, A4[0] - M, y);
   draw(page, 'Pending items', M, y - 16, bold, 16);
   y -= 22;
   draw(page, sanitize(input.projectName, body), M, y - 12, bold, 12);
