@@ -83,9 +83,13 @@ Photos are compressed in the browser to ≤1280px WebP (~150–250 KB). 5,000 ph
 Supabase Pro ($25/mo) includes 100 GB; free tier 1 GB. Photos are not a cost concern at VTech's scale.
 
 ## 8. Open decisions
-1. WhatsApp: stay on free tap-to-send, or move to Meta Cloud API (paid per message, needs template approval).
-2. Workspace access for `gmail_api` (Hansal arranging).
-4. Vipul's login email and the PM lead's name/email for bootstrap.
+1. WhatsApp: stay on free tap-to-send, or move to Meta Cloud API (paid per message, needs template approval). Live today: `link` (free).
+2. Workspace access for `gmail_api` (Hansal arranging). Live today: `compose_link` (opens the PM's own Gmail).
+3. ~~Vipul's login email~~: done, vipul@vtechpl.com exists and signs in. **Still open:** the real PM lead's name and email
+   (only the test account `hansalgandhi+pmlead@gmail.com` holds that role).
+4. The §11 "Defaults to confirm with VTech" still need VTech's confirmation. (The master-list interpretations were approved on 2026-10-28.)
+
+Accounts `e2e-pm@example.com` / `e2e-lead@example.com` ("E2E Test …") exist only for the automated tests (docs/ACCEPTANCE.md).
 
 ## 9. Not in v1
 Agency portal or agency self-reporting · offline-first sync (v1 queues failed saves and retries) · merging with the BOQ tool (planned later; same Supabase project can host both).
