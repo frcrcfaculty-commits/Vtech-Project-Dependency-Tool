@@ -6,6 +6,7 @@ import { supabaseBrowser } from '@/lib/client/supabase';
 import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
 import { RoomDependencyPicker } from '@/components/room-dependency-picker';
+import { RoomProductPicker } from '@/components/room-product-picker';
 import Link from 'next/link';
 
 interface Floor {
@@ -121,6 +122,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
   ]);
 
   // Step 4 local states
+  const [useMasterListMode, setUseMasterListMode] = useState(false);
   const [depSearch, setDepSearch] = useState('');
   const [selectedMasterIds, setSelectedMasterIds] = useState<Set<string>>(new Set());
   const [showCustomDepModal, setShowCustomDepModal] = useState(false);
@@ -1298,26 +1300,37 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
           );
         })()}
 
-        {/* ───────────────────────── STEP 4 (OFFICE MODE): ROOM-BY-ROOM ───────────────────────── */}
+        {/* ───────────────────────── STEP 4 (OFFICE MODE): ROOM-BY-ROOM PRODUCTS ───────────────────────── */}
         {!isClassic && currentStep === 4 && (
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h2 className="text-base font-semibold text-text-primary">
-                  Step 4: Room-by-Room Dependencies
+                  {useMasterListMode ? 'Step 4: Room-by-Room Dependencies (Master List)' : 'Step 4: Room-by-Room Products'}
                 </h2>
                 <p className="text-xs text-text-secondary mt-0.5">
-                  Configure trade dependencies room by room. You can also edit these anytime later.
+                  {useMasterListMode
+                    ? 'Configure trade dependencies room by room from the 78-item master list.'
+                    : 'Place the products VTech sells in each room with location and step tracking.'}
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setIsClassic(true)}
-                className="text-xs text-accent hover:underline text-left sm:text-right"
-              >
-                Switch to classic bulk matrix setup →
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setUseMasterListMode(!useMasterListMode)}
+                  className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors"
+                >
+                  {useMasterListMode ? 'Switch to Product Picker (v3)' : 'Use master dependency list (classic)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsClassic(true)}
+                  className="text-xs text-accent hover:underline text-left sm:text-right"
+                >
+                  Switch to classic bulk matrix setup →
+                </button>
+              </div>
             </div>
 
             {rooms.length === 0 ? (
@@ -1331,13 +1344,22 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                   ← Go to Step 2: Floors &amp; Rooms
                 </button>
               </div>
-            ) : (
+            ) : useMasterListMode ? (
               <RoomDependencyPicker
                 projectId={projectId}
                 roomId={wizardRoomId || rooms[0]?.id}
                 onRoomChange={(newId) => setWizardRoomId(newId)}
                 onFinish={() => setCurrentStep(5)}
                 isWizard={true}
+              />
+            ) : (
+              <RoomProductPicker
+                projectId={projectId}
+                roomId={wizardRoomId || rooms[0]?.id}
+                onRoomChange={(newId) => setWizardRoomId(newId)}
+                onFinish={() => setCurrentStep(5)}
+                isWizard={true}
+                onSwitchToMasterList={() => setUseMasterListMode(true)}
               />
             )}
 

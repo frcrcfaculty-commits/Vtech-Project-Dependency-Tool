@@ -4,6 +4,7 @@ import { use, useEffect, useState } from 'react';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { AppHeader } from '@/components/app-header';
 import { RoomDependencyPicker } from '@/components/room-dependency-picker';
+import { RoomProductPicker } from '@/components/room-product-picker';
 import Link from 'next/link';
 
 export default function RoomDependenciesPage({
@@ -13,6 +14,7 @@ export default function RoomDependenciesPage({
 }) {
   const { projectId, roomId } = use(params);
   const [projectName, setProjectName] = useState<string>('');
+  const [useMasterList, setUseMasterList] = useState(false);
 
   useEffect(() => {
     async function loadProject() {
@@ -29,26 +31,46 @@ export default function RoomDependenciesPage({
 
       <main className="mx-auto max-w-4xl px-4 pt-6 space-y-6">
         {/* Navigation Breadcrumb */}
-        <div>
-          <Link
-            href={`/projects/${projectId}`}
-            className="inline-flex items-center gap-1 text-xs font-medium text-text-secondary hover:text-text-primary mb-2"
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <Link
+              href={`/projects/${projectId}`}
+              className="inline-flex items-center gap-1 text-xs font-medium text-text-secondary hover:text-text-primary mb-2"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+              Back to {projectName || 'Project'}
+            </Link>
+            <h1 className="text-xl font-bold tracking-tight text-text-primary">
+              Room Dependencies — {projectName}
+            </h1>
+            <p className="text-xs text-text-secondary mt-1">
+              {useMasterList
+                ? 'Configure trade dependencies room by room from the 78-item master list.'
+                : 'Place products VTech sells with location and step tracking.'}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setUseMasterList(!useMasterList)}
+            className="self-start sm:self-auto rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors"
           >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-            Back to {projectName || 'Project'}
-          </Link>
-          <h1 className="text-xl font-bold tracking-tight text-text-primary">
-            Room Dependencies — {projectName}
-          </h1>
-          <p className="text-xs text-text-secondary mt-1">
-            Configure trade dependencies room by room. Changes are assigned immediately to contractor trades.
-          </p>
+            {useMasterList ? 'Switch to Product Picker (v3)' : 'Use master dependency list (classic)'}
+          </button>
         </div>
 
-        {/* Room Dependency Picker Component */}
-        <RoomDependencyPicker projectId={projectId} roomId={roomId} />
+        {/* Room Picker Component */}
+        {useMasterList ? (
+          <RoomDependencyPicker projectId={projectId} roomId={roomId} />
+        ) : (
+          <RoomProductPicker
+            projectId={projectId}
+            roomId={roomId}
+            onSwitchToMasterList={() => setUseMasterList(true)}
+          />
+        )}
       </main>
     </div>
   );
