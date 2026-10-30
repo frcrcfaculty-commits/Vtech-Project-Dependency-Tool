@@ -11,7 +11,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const one = <T,>(x: unknown): T | null => (Array.isArray(x) ? (x[0] ?? null) : (x ?? null)) as T | null;
 const chunks = <T,>(a: T[], n = 200) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
 
-type Gate = { item_id: string; project_id: string; room_product_id: string; status: string; seq: number; label: string; title: string; location: string | null };
+type Gate = { item_id: string; project_id: string; room_product_id: string; status: string; phase: number; seq: number; label: string; title: string; location: string | null };
 type Item = { id: string; project_id: string; room_product_id: string | null; first_raised_on: string | null; completed_on: string | null; note: string | null;
   rooms: unknown; project_dependencies: unknown };
 
@@ -33,7 +33,7 @@ export async function GET(req: Request) {
     for (const part of chunks(ids)) {
       for (let from = 0; ; from += 1000) {
         const { data, error } = await db.from('item_gate')
-          .select('item_id, project_id, room_product_id, status, seq, label, title, location')
+          .select('item_id, project_id, room_product_id, status, phase, seq, label, title, location')
           .in('project_id', part).eq('waits_on_client', true)
           .or('status.eq.pending,and(status.eq.unchecked,locked.eq.false)')
           .order('item_id').range(from, from + 999);
@@ -68,18 +68,28 @@ export async function GET(req: Request) {
       }
     }
 
-    // "Ready" steps have no raised date: use the latest completion among the product's other steps (when it unlocked).
+    // "Ready" steps have no raised date; "since" = when they unlocked. A green (phase 1) step, or a product without greens,
+    // is open from the moment the product is placed; any other step opens when the product's last green closed.
     const readyRps = [...new Set(gates.filter((g) => g.status === 'unchecked').map((g) => g.room_product_id))];
-    const unlockedOn = new Map<string, string>();
+    const placedOn = new Map<string, string>();
+    const lastGreenOn = new Map<string, string>();
     for (const part of chunks(readyRps)) {
-      const { data, error } = await db.from('dependency_items').select('room_product_id, completed_on')
-        .in('room_product_id', part).not('completed_on', 'is', null);
-      if (error) throw error;
-      for (const r of data ?? []) {
-        const cur = unlockedOn.get(r.room_product_id!);
-        if (!cur || r.completed_on! > cur) unlockedOn.set(r.room_product_id!, r.completed_on!);
+      const rp = await db.from('room_products').select('id, created_at').in('id', part);
+      if (rp.error) throw rp.error;
+      for (const r of rp.data ?? []) placedOn.set(r.id, new Date(new Date(r.created_at).getTime() + 5.5 * 3_600_000).toISOString().slice(0, 10));
+      const gr = await db.from('item_gate').select('item_id, room_product_id').in('room_product_id', part).eq('phase', 1);
+      if (gr.error) throw gr.error;
+      const greenIds = (gr.data ?? []).map((g) => g.item_id);
+      for (const ip of chunks(greenIds)) {
+        const { data, error } = await db.from('dependency_items').select('room_product_id, completed_on').in('id', ip).not('completed_on', 'is', null);
+        if (error) throw error;
+        for (const r of data ?? []) {
+          const cur = lastGreenOn.get(r.room_product_id!);
+          if (!cur || r.completed_on! > cur) lastGreenOn.set(r.room_product_id!, r.completed_on!);
+        }
       }
     }
+    const unlockedOn = (g: Gate) => (g.phase === 1 ? null : lastGreenOn.get(g.room_product_id)) ?? placedOn.get(g.room_product_id) ?? null;
 
     const gateById = new Map(gates.map((g) => [g.item_id, g]));
     const byProject = new Map<string, ClientProject>((projects ?? []).map((p) => [p.id, { name: p.name, clientName: p.client_name, items: [] }]));
@@ -94,7 +104,7 @@ export async function GET(req: Request) {
         product: g ? `${g.title}${g.location ? ` (${g.location})` : ''}` : null,
         seq: g?.seq ?? dep?.seq ?? 0, step: g?.label ?? dep?.text ?? '',
         state: ready ? 'ready' : 'pending',
-        since: ready ? (unlockedOn.get(g!.room_product_id) ?? null) : i.first_raised_on,
+        since: ready ? unlockedOn(g!) : i.first_raised_on,
         note: i.note,
       };
       byProject.get(i.project_id)?.items.push(row);
