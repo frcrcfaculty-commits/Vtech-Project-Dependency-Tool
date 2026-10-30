@@ -15,7 +15,6 @@ const one = <T,>(v: One<T>): T => (Array.isArray(v) ? v[0] : v) as T;
 
 interface ItemRow {
   id: string; agency_id: string | null; first_raised_on: string | null; reminder_count: number; note: string | null;
-  responsibility: 'external' | 'internal' | 'client' | null;
   rooms: One<{ name: string; sort: number; floors: One<{ label: string; sort: number }> }>;
   project_dependencies: One<{ text: string; seq: number }>;
 }
@@ -48,7 +47,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
     db.from('agencies').select('id, company_name, escalation_enabled, agency_types(name, internal), agency_contacts(id, name, designation, level, email, phone, active)')
       .eq('project_id', visit.project_id),
     db.from('dependency_items')
-      .select('id, agency_id, first_raised_on, reminder_count, note, responsibility, rooms!inner(name, sort, floors!inner(label, sort)), project_dependencies!inner(text, seq)')
+      .select('id, agency_id, first_raised_on, reminder_count, note, rooms!inner(name, sort, floors!inner(label, sort)), project_dependencies!inner(text, seq)')
       .eq('project_id', visit.project_id).eq('status', 'pending'),
   ]);
   if (!project) throw new HttpError(404, 'Project not found');
@@ -68,8 +67,6 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
     if (onlyItems && !onlyItems.has(r.id)) continue;
     if (onlyAgencies && (!r.agency_id || !onlyAgencies.has(r.agency_id))) continue;
     const room = one(r.rooms), floor = one(room.floors), dep = one(r.project_dependencies);
-    // Blue (client) steps are never chased by reminder: they are reported, not blamed on anyone.
-    if (r.responsibility === 'client') { clientSkipped++; continue; }
     if (!r.agency_id) { warnings.push(`"${dep.text}" in ${floor.label} – ${room.name} has no agency assigned; not sent.`); continue; }
     const list = byAgency.get(r.agency_id) ?? [];
     list.push({
@@ -79,12 +76,13 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
     byAgency.set(r.agency_id, list);
   }
 
-  if (clientSkipped) warnings.push(`${clientSkipped} item${clientSkipped === 1 ? '' : 's'} waiting on the client — not sent as reminders (shown in reports).`);
   const result: PrepareResult = { dispatches: [], warnings };
   for (const a of (agencies ?? []) as AgencyRow[]) {
     const list = byAgency.get(a.id);
     if (!list?.length) continue;
     const typeName = one(a.agency_types).name;
+    // Items waiting on the client are reported, never chased by reminder (VTech's rule).
+    if (typeName === 'Client') { clientSkipped += list.length; continue; }
     const contacts: Contact[] = a.agency_contacts.map((c) => ({ ...c, level: c.level as Level }));
     const report = buildAgencyReport({
       project: {
@@ -117,6 +115,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
       result.dispatches.push({ id: row.id, agency: `${typeName} – ${a.company_name}`, channel: d.channel, level: report.level, itemCount: list.length });
     }
   }
+  if (clientSkipped) warnings.push(`${clientSkipped} item${clientSkipped === 1 ? '' : 's'} waiting on the client — not sent as reminders (shown in reports).`);
   return result;
 }
 

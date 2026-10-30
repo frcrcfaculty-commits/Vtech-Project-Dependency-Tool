@@ -1,11 +1,12 @@
--- Product tracking (VTech change request, 2026-10-30).
--- Rooms now get PRODUCTS VTech sells (title + location, from sheet "Ashutosh Project Status" → tab "Hansal").
--- Each product carries a fixed chain of steps (columns D..P). Colour = who it waits on:
---   green  → external agency   (phase 1, all may be pending at the same time)
---   red    → VTech installers / programmers, orange → VTech project managers (internal, phase 2)
---   blue   → the client (phase 2, never chased by reminder; reported only)
--- Phase-2 steps unlock only after EVERY phase-1 step of that product is Done or N.A.;
--- gate 'after_previous' additionally waits for the earlier phase-2 steps (installation → testing).
+-- Product tracking (VTech change request, 2026-10-30, sheet rev. 11:50).
+-- Rooms get PRODUCTS VTech sells (sheet "Ashutosh Project Status" → tab "Hansal": Products, Location, Dependency 1..14).
+-- Each product carries a fixed chain of steps. Colour legend (rows 36-40):
+--   green  → other agencies   (phase 1: all open at once)
+--   blue   → other agencies   (phase 2)
+--   dark red → VTech Installers, light red → VTech Programmers, orange → VTech Project managers (internal, phase 2)
+-- ALL phase-2 steps unlock together once EVERY green step of that product is Done or N.A. (gate 'after_external').
+-- 'after_previous' (sequential) is supported for catalogue edits but not used by the sheet.
+-- Steps assigned to the project's Client agency are reported, never chased by reminder.
 -- Additive: the master-list flow (0006) and the classic visit flow keep working.
 
 -- ── internal team ──
@@ -78,6 +79,7 @@ create view public.item_gate with (security_invoker = true) as
 select i.id as item_id, i.project_id, i.room_id, i.room_product_id, i.status,
        s.id as step_id, s.seq, s.label, s.phase, s.responsibility, s.gate,
        pc.title, rp.location,
+       coalesce(t.name = 'Client', false) as waits_on_client,
        case
          when s.phase = 1 or i.status in ('complete', 'na') then false
          when exists (select 1 from public.dependency_items j join public.product_steps sj on sj.id = j.step_id
@@ -92,7 +94,9 @@ select i.id as item_id, i.project_id, i.room_id, i.room_product_id, i.status,
   from public.dependency_items i
   join public.product_steps s       on s.id = i.step_id
   join public.room_products rp      on rp.id = i.room_product_id
-  join public.product_catalogue pc  on pc.id = rp.product_id;
+  join public.product_catalogue pc  on pc.id = rp.product_id
+  left join public.agencies a       on a.id = i.agency_id
+  left join public.agency_types t   on t.id = coalesce(a.agency_type_id, s.default_agency_type_id);
 
 create function public.item_is_locked(p_item uuid) returns boolean
 language sql stable security invoker set search_path = public as $$
