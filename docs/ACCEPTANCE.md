@@ -1,7 +1,7 @@
 # Acceptance status — every check from the briefs
 
 Last run: **2026-10-31 (IST)** against the live Supabase project and a local production build (Vercel Sandbox, bom1).
-- `npm run typecheck` clean · `npm test` 33/33 · `npm run test:sql` 72 checks.
+- `npm run typecheck` clean · `npm test` 33/33 · `npm run test:sql` 81 checks.
 - e2e: API 24/24 (`flow` 10, `office` 8, `products` 6). Browser 10/10 (`products.browser` 3, `office.browser` 5, `s5-s6.browser` 2).
 
 How to re-run: see `e2e/README.md`. Without the service-role key, `admin()` falls back to the PM lead session; then delete
@@ -47,6 +47,11 @@ Legend: ✅ test = an automated test proves it · ✅ checked = verified from th
 | P5 new product "Video door phone" selectable in the picker immediately | ✅ checked | Picker reads `product_catalogue` where `active` on every load, ordered by `sort`; no dedicated test |
 | H11 all three Pending lanes non-empty for Demo – Gandhi Residency 2 | ✅ checked | Live data: external 12, internal 6, waiting on client 8 |
 | H13 product e2e (API + browser) | ✅ test | `e2e/products.e2e.ts` 6/6, `e2e/products.browser.e2e.ts` 3/3 |
+
+## Project deletion (2026-10-31)
+| Check | Status | Evidence |
+|---|---|---|
+| Only Vipul and Hansal can delete projects; another super admin, PM lead or PM cannot; nobody can grant themselves | ✅ test | `tests/sql/10_behaviour_test.sql` (0008 block, 9 checks); live: `project_deleters` = vipul@vtechpl.com, hansalgandhi@gmail.com |
 
 ## Bugs found while running these
 - Hub and Pending stamped status dates in **UTC**: anything marked between 00:00 and 05:30 IST got yesterday's date.

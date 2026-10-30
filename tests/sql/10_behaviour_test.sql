@@ -320,4 +320,45 @@ select public.remove_room_product((select id from t_cs));
 select pg_temp.assert((select count(*) from public.dependency_items where room_product_id=(select id from t_cs)) = 0, 'remove_room_product removes its steps');
 reset role;
 
+-- ── 0008: only listed accounts may delete projects ──
+-- Vipul is listed; a second super admin (05) is not.
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000005', 'other-admin@vtechpl.com');
+insert into public.profiles (id, full_name, email, role) values ('00000000-0000-0000-0000-000000000005', 'Other Admin', 'other-admin@vtechpl.com', 'super_admin');
+insert into public.project_deleters (user_id) values ('00000000-0000-0000-0000-000000000001');
+create temp table t_del as select id from public.projects order by created_at limit 1;
+grant select on t_del to authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+set role authenticated;
+select pg_temp.assert(not public.can_delete_projects(), 'unlisted super admin cannot delete projects');
+delete from public.projects where id = (select id from t_del);
+select pg_temp.assert((select count(*) from public.projects where id = (select id from t_del)) = 1, 'unlisted super admin delete removes nothing');
+do $$ begin
+  insert into public.project_deleters (user_id) values ('00000000-0000-0000-0000-000000000005');
+  raise exception 'should have failed';
+exception when insufficient_privilege then raise notice 'ok - nobody can add themselves to project_deleters';
+end $$;
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+set role authenticated;
+delete from public.projects where id = (select id from t_del);
+select pg_temp.assert((select count(*) from public.projects where id = (select id from t_del)) = 1, 'PM lead cannot delete a project');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+set role authenticated;
+delete from public.projects where id = (select id from t_del);
+select pg_temp.assert((select count(*) from public.projects where id = (select id from t_del)) = 1, 'PM (member) cannot delete a project');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+set role authenticated;
+select pg_temp.assert(public.can_delete_projects(), 'listed account (Vipul) can delete projects');
+delete from public.projects where id = (select id from t_del);
+select pg_temp.assert((select count(*) from public.projects where id = (select id from t_del)) = 0, 'listed account deletes the project');
+reset role;
+select pg_temp.assert((select count(*) from public.dependency_items where project_id = (select id from t_del)) = 0, 'project delete cascades to its items');
+update public.profiles set active = false where id = '00000000-0000-0000-0000-000000000001';
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+set role authenticated;
+select pg_temp.assert(not public.can_delete_projects(), 'deactivated listed account loses the right');
+reset role;
+
 \echo ALL SQL TESTS PASSED

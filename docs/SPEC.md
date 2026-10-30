@@ -16,6 +16,10 @@ or how many times it was chased, and no structured escalation.
 | pm_lead | One VTech lead | Creates PM accounts, assigns PMs to projects, sees all projects, edits master list. Cannot create admins. |
 | pm | Site PMs | Creates projects (becomes member), runs visits, sends reminders for projects they're assigned to. |
 
+**Deleting a project** (permanent, with all its data and photos) is limited to the accounts listed in `project_deleters`:
+Vipul and Hansal (VTech decision 2026-10-31, migration 0008). Being a super admin is not enough, and nobody can add
+themselves from the app; the list changes only by SQL. Everyone else uses **Close Project**, which hides it but keeps the record.
+
 ## 3. Core concepts
 - **Master list** — VTech's dependency checklist per agency type (78 active items: 69 cleaned from the sheet + 9 from the Specimen, approved by VTech 2026-10-28). Admins edit; PMs read.
 - **Project dependencies** — items picked from the master list, plus **custom** items the PM adds on the go. A custom item can be **promoted** to the master list by an admin.

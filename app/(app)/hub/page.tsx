@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
+import { DeleteProjectButton } from '@/components/delete-project-button';
 import { compressImageToWebP } from '@/lib/client/image';
 import { todayIST } from '@/lib/client/date';
 import { getEscalationLevel, isEscalated, formatEscalationLabel } from '@/lib/client/escalation';
@@ -898,6 +899,21 @@ function HubContent() {
                     {updatingProjectStatus ? 'Closing…' : 'Close Project'}
                   </button>
                 )}
+
+                {/* Delete Project: only Vipul and Hansal (project_deleters) see this */}
+                <DeleteProjectButton
+                  key={selectedProject.id}
+                  projectId={selectedProject.id}
+                  projectName={selectedProject.name}
+                  onDeleted={() => {
+                    const name = selectedProject.name;
+                    const remaining = projects.filter((p) => p.id !== selectedProject.id && (showClosed || p.status !== 'closed'));
+                    setProjects((prev) => prev.filter((p) => p.id !== selectedProject.id));
+                    setSelectedProjectId(remaining[0]?.id ?? '');
+                    setNotice(`Project "${name}" deleted.`);
+                    setTimeout(() => setNotice(null), 3000);
+                  }}
+                />
               </div>
             </div>
 

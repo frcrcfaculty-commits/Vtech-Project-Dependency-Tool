@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
+import { DeleteProjectButton } from '@/components/delete-project-button';
 import Link from 'next/link';
 
 interface Project {
@@ -1054,6 +1055,14 @@ export default function ProjectHomePage({
                 >
                   Close Project
                 </button>
+              )}
+              {project && (
+                <DeleteProjectButton
+                  projectId={projectId}
+                  projectName={project.name}
+                  onDeleted={() => router.push('/hub')}
+                  className="ml-2 rounded-lg border border-danger/40 bg-danger px-4 py-2 text-xs font-semibold text-white hover:opacity-90 transition-opacity"
+                />
               )}
             </div>
 
