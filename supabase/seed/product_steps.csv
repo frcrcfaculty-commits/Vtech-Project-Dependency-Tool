@@ -1,0 +1,164 @@
+product,seq,label,phase,responsibility,gate,default_agency_type,sheet_colour,sheet_cell
+Keypad,1,Engraving submitted,1,external,none,Architect,D9EAD3,D3
+Keypad,2,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,E3
+Keypad,3,Readiness to install,1,external,none,Electrician,D9EAD3,F3
+Keypad,4,Readiness of dustfree,1,external,none,Painter,D9EAD3,G3
+Keypad,5,Installation,2,internal,after_external,VTech Installers,E06666,I3
+Keypad,6,Identifying,2,internal,after_external,VTech Programmers,F4CCCC,J3
+Keypad,7,Programming,2,internal,after_external,VTech Programmers,F4CCCC,K3
+Wall panel,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D4
+Wall panel,2,Readiness to install,1,external,none,Electrician,D9EAD3,E4
+Wall panel,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F4
+Wall panel,4,Installation,2,internal,after_external,VTech Installers,E06666,I4
+Wall panel,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J4
+Wall panel,6,Programming,2,internal,after_external,VTech Programmers,F4CCCC,K4
+Curtain,1,Schedule from the other vendor,1,external,none,Curtain Vendor,D9EAD3,D5
+Curtain,2,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,E5
+Curtain,3,Opening details,1,external,none,Architect,D9EAD3,F5
+Curtain,4,Readiness of cable,1,external,none,Electrician,D9EAD3,G5
+Curtain,5,Readiness of dustfree,1,external,none,Painter,D9EAD3,H5
+Curtain,6,Installation,2,internal,after_external,VTech Installers,E06666,I5
+Curtain,7,Fabric installation,2,external,after_external,Curtain Vendor,CFE2F3,J5
+Curtain,8,Limit setting/ cover motor,2,internal,after_external,VTech Programmers,F4CCCC,K5
+Curtain,9,Programming,2,internal,after_external,VTech Programmers,F4CCCC,L5
+Wifi Access point,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D6
+Wifi Access point,2,Readiness of cable,1,external,none,Electrician,D9EAD3,E6
+Wifi Access point,3,Readiness to install,1,external,none,Electrician,D9EAD3,F6
+Wifi Access point,4,Readiness of dustfree,1,external,none,Painter,D9EAD3,G6
+Wifi Access point,5,Installation,2,internal,after_external,VTech Installers,E06666,I6
+Wifi Access point,6,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J6
+Sensor Intelligent,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D7
+Sensor Intelligent,2,Readiness of cable,1,external,none,Electrician,D9EAD3,E7
+Sensor Intelligent,3,Readiness to install,1,external,none,Electrician,D9EAD3,F7
+Sensor Intelligent,4,Readiness of dustfree,1,external,none,Painter,D9EAD3,G7
+Sensor Intelligent,5,Installation,2,internal,after_external,VTech Installers,E06666,I7
+Sensor Intelligent,6,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J7
+Sensor Intelligent,7,Programming,2,internal,after_external,VTech Programmers,F4CCCC,K7
+Sensor sada,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D8
+Sensor sada,2,Readiness of cable,1,external,none,Electrician,D9EAD3,E8
+Sensor sada,3,Readiness to install,1,external,none,Electrician,D9EAD3,F8
+Sensor sada,4,Installation,2,internal,after_external,VTech Installers,E06666,I8
+Sensor sada,5,Time setting,2,internal,after_external,VTech Programmers,F4CCCC,J8
+Speakers,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D9
+Speakers,2,Readiness of cable,1,external,none,Electrician,D9EAD3,E9
+Speakers,3,Readiness to install,1,external,none,Electrician,D9EAD3,F9
+Speakers,4,Installation,2,internal,after_external,VTech Installers,E06666,I9
+Speakers,5,Sound testing,2,internal,after_external,VTech Programmers,F4CCCC,J9
+Camera,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D10
+Camera,2,Readiness of cable,1,external,none,Electrician,D9EAD3,E10
+Camera,3,Readiness to install,1,external,none,Electrician,D9EAD3,F10
+Camera,4,Installation,2,internal,after_external,VTech Installers,E06666,I10
+Camera,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J10
+Camera,6,5G viewing,2,internal,after_external,VTech Programmers,F4CCCC,K10
+QSM,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D11
+QSM,2,Readiness of cable,1,external,none,Electrician,D9EAD3,E11
+QSM,3,Readiness to install,1,external,none,Electrician,D9EAD3,F11
+QSM,4,Installation,2,internal,after_external,VTech Installers,E06666,I11
+QSM,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J11
+Door lock,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D12
+Door lock,2,Readiness of cable,1,external,none,Electrician,D9EAD3,E12
+Door lock,3,Readiness to install,1,external,none,Electrician,D9EAD3,F12
+Door lock,4,Readiness by carpenter,2,external,after_external,Carpenter,C9DAF8,G12
+Door lock,5,Installation,2,internal,after_external,VTech Installers,E06666,I12
+Door lock,6,Programming,2,internal,after_external,VTech Programmers,F4CCCC,J12
+Ekey scanner,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D13
+Ekey scanner,2,Readiness of cable,1,external,none,Electrician,D9EAD3,E13
+Ekey scanner,3,Readiness to install,1,external,none,Electrician,D9EAD3,F13
+Ekey scanner,4,Readiness of dustfree,1,external,none,Painter,D9EAD3,G13
+Ekey scanner,5,Installation,2,internal,after_external,VTech Installers,E06666,I13
+Ekey scanner,6,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J13
+Ekey scanner,7,Client impressions,2,external,after_external,Client,C9DAF8,K13
+Ekey scanner,8,Programming,2,internal,after_external,VTech Programmers,F4CCCC,L13
+Automation DB,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D15
+Automation DB,2,Readiness to install,1,external,none,Electrician,D9EAD3,E15
+Off Termination,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D16
+Off Termination,2,Ferrule sheet,2,external,after_external,Electrician,C9DAF8,E16
+Off Termination,3,Installation,2,internal,after_external,VTech Installers,E06666,I16
+Fan control,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D17
+Fan control,2,Readiness to install,1,external,none,Electrician,D9EAD3,E17
+Fan control,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F17
+Fan control,4,Installation,2,internal,after_external,VTech Installers,E06666,I17
+Fan control,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J17
+Fan control,6,Programming,2,internal,after_external,VTech Programmers,F4CCCC,K17
+Dimmer dali,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D18
+Dimmer dali,2,Readiness to install,1,external,none,Electrician,D9EAD3,E18
+Dimmer dali,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F18
+Dimmer dali,4,Installation,2,internal,after_external,VTech Installers,E06666,I18
+Dimmer dali,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J18
+Dimmer dali,6,Partial installation done,2,external,after_external,Electrician,C9DAF8,K18
+Dimmer dali,7,Light addressing (partial),2,internal,after_external,VTech Programmers,F4CCCC,L18
+Dimmer dali,8,Complete installation,2,external,after_external,Electrician,C9DAF8,M18
+Dimmer dali,9,Scene setting,2,external,after_external,Client,C9DAF8,N18
+Dimmer dali,10,Light addressing (complete),2,internal,after_external,VTech Programmers,F4CCCC,O18
+Dimmer,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D19
+Dimmer,2,Readiness to install,1,external,none,Electrician,D9EAD3,E19
+Dimmer,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F19
+Dimmer,4,Installation,2,internal,after_external,VTech Installers,E06666,I19
+Dimmer,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J19
+Dimmer,6,Partial installation done,2,external,after_external,Electrician,C9DAF8,K19
+Dimmer,7,Light addressing (partial),2,internal,after_external,VTech Programmers,F4CCCC,L19
+Dimmer,8,Complete installation,2,external,after_external,Electrician,C9DAF8,M19
+Dimmer,9,Scene setting,2,external,after_external,Client,C9DAF8,N19
+Dimmer,10,Light addressing (complete),2,internal,after_external,VTech Programmers,F4CCCC,O19
+Lutron processor,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D20
+Lutron processor,2,Readiness to install,1,external,none,Electrician,D9EAD3,E20
+Lutron processor,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F20
+Lutron processor,4,Installation,2,internal,after_external,VTech Installers,E06666,I20
+Lutron processor,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J20
+AC control,1,Schedule from the other vendor,1,external,none,AC Vendor,D9EAD3,D21
+AC control,2,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,E21
+AC control,3,Readiness to install,1,external,none,Electrician,D9EAD3,F21
+AC control,4,Readiness of dustfree,1,external,none,Painter,D9EAD3,G21
+AC control,5,Installation,2,internal,after_external,VTech Installers,E06666,I21
+AC control,6,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J21
+AC control,7,Programming,2,internal,after_external,VTech Programmers,F4CCCC,K21
+AV Rack,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D23
+AV Rack,2,Readiness to install,1,external,none,Electrician,D9EAD3,E23
+Switch /Router,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D24
+Switch /Router,2,Readiness of cable,1,external,none,Electrician,D9EAD3,E24
+Switch /Router,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F24
+Switch /Router,4,Installation,2,internal,after_external,VTech Installers,E06666,I24
+Switch /Router,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J24
+Switch /Router,6,Internet activation,2,external,after_external,Network Agency,C9DAF8,K24
+Switch /Router,7,5G controls,2,internal,after_external,VTech Programmers,F4CCCC,L24
+AV Control,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D25
+AV Control,2,Readiness to install,1,external,none,Electrician,D9EAD3,E25
+AV Control,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F25
+AV Control,4,Installation,2,internal,after_external,VTech Installers,E06666,I25
+AV Control,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J25
+AV Control,6,Programming,2,internal,after_external,VTech Programmers,F4CCCC,K25
+Amplification,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D26
+Amplification,2,Readiness to install,1,external,none,Electrician,D9EAD3,E26
+Amplification,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F26
+Amplification,4,Installation,2,internal,after_external,VTech Installers,E06666,I26
+Amplification,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J26
+Amplification,6,Programming,2,internal,after_external,VTech Programmers,F4CCCC,K26
+Home Theatre,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D27
+Home Theatre,2,Readiness to install,1,external,none,Electrician,D9EAD3,E27
+Home Theatre,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F27
+Home Theatre,4,Installation,2,internal,after_external,VTech Installers,E06666,I27
+Home Theatre,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J27
+Home Theatre,6,Programming,2,internal,after_external,VTech Programmers,F4CCCC,K27
+Other AV devices,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D28
+Other AV devices,2,Readiness to install,1,external,none,Electrician,D9EAD3,E28
+Other AV devices,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F28
+Other AV devices,4,Installation,2,internal,after_external,VTech Installers,E06666,I28
+Other AV devices,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J28
+Other AV devices,6,Programming,2,internal,after_external,VTech Programmers,F4CCCC,K28
+Crestron Processor,1,Delivery pending client / VTECH,1,external,none,Client,D9EAD3,D29
+Crestron Processor,2,Readiness to install,1,external,none,Electrician,D9EAD3,E29
+Crestron Processor,3,Readiness of dustfree,1,external,none,Painter,D9EAD3,F29
+Crestron Processor,4,Installation,2,internal,after_external,VTech Installers,E06666,I29
+Crestron Processor,5,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,J29
+Crestron Processor,6,Programming,2,internal,after_external,VTech Programmers,F4CCCC,K29
+iPhone programming,1,Configuration,2,internal,after_external,VTech Programmers,F4CCCC,I30
+iPhone programming,2,Programming,2,internal,after_external,VTech Programmers,F4CCCC,J30
+Client Side,1,Client phone loading,2,internal,after_external,VTech Programmers,F4CCCC,I32
+Client Side,2,Demo,2,internal,after_external,VTech Programmers,F4CCCC,J32
+Client Side,3,As built drawing,2,internal,after_external,VTech Project Managers,F9CB9C,K32
+Client Side,4,Roomwise BOQ,2,internal,after_external,VTech Project Managers,F9CB9C,L32
+Client Side,5,Operation manual,2,internal,after_external,VTech Project Managers,F9CB9C,M32
+Client Side,6,Special programming,2,internal,after_external,VTech Project Managers,F9CB9C,N32
+Client Side,7,AMC team intro,2,external,after_external,Client,C9DAF8,O32
+Client Side,8,Site photo,2,internal,after_external,VTech Project Managers,F9CB9C,P32
+Client Side,9,Client testimony,2,internal,after_external,VTech Project Managers,F9CB9C,Q32

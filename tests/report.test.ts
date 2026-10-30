@@ -127,3 +127,18 @@ describe('office follow-up wording', () => {
     expect(site.whatsapp!.text).toContain('Site visit');
   });
 });
+
+describe('internal team reminders', () => {
+  it('internal: [Internal] subject, no agency terms footer', () => {
+    const input = base([item()]);
+    const r = buildAgencyReport({ ...input, agency: { ...input.agency, internal: true } });
+    expect(r.email!.subject.startsWith('[Internal]')).toBe(true);
+    expect(r.email!.text).not.toContain('General terms and attention');
+    expect(r.whatsapp!.text).not.toContain('protect installed automation devices');
+  });
+  it('external keeps the terms footer', () => {
+    const r = buildAgencyReport(base([item()]));
+    expect(r.email!.subject.startsWith('[Internal]')).toBe(false);
+    expect(r.email!.text).toContain('General terms and attention');
+  });
+});

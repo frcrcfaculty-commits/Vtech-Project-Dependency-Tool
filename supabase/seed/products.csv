@@ -1,0 +1,28 @@
+title,scope,location_options,sort
+Keypad,room,Entrance|Bedside|sofa side|Other,1
+Wall panel,room,Entrance|Bedside|sofa side,2
+Curtain,room,Sheer|Heavy|Roller|Roman,3
+Wifi Access point,room,Ceiling|Room|Hall|Entrance|External,4
+Sensor Intelligent,room,Ceiling,5
+Sensor sada,room,Ceiling,6
+Speakers,room,Ceiling|Wall,7
+Camera,room,Ceiling,8
+QSM,room,Ceiling,9
+Door lock,room,Door frame,10
+Ekey scanner,room,Door entrance,11
+Automation DB,room,Main DB location,12
+Off Termination,room,Main DB location,13
+Fan control,room,Main DB location,14
+Dimmer dali,room,Main DB location,15
+Dimmer,room,Main DB location,16
+Lutron processor,room,Main DB location,17
+AC control,room,Main DB location,18
+AV Rack,room,Main DB location|AV rack|Room Rack,19
+Switch /Router,room,AV Rack,20
+AV Control,room,Main DB location|AV rack|Room Rack,21
+Amplification,room,Main DB location|AV rack|Room Rack,22
+Home Theatre,room,Main DB location|AV rack|Room Rack,23
+Other AV devices,room,Main DB location|AV rack|Room Rack,24
+Crestron Processor,room,Main DB location|AV rack|Room Rack,25
+iPhone programming,project,,26
+Client Side,project,,27

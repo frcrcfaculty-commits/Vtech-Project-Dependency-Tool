@@ -115,3 +115,51 @@ reachable as "Site visit mode (classic)". Do not delete them: they are the basis
 | table `item_events` | History per item (status, date, note, photo, source office/visit, who, when). RLS by project. |
 | `POST /api/projects/{projectId}/reminders` `{agencyIds?, itemIds?}` | Opens an office follow-up round and builds drafts for the chosen pending items. Returns `{visitId, dispatches, warnings}`; `visitId` is null when nothing to send. Then open `/projects/{projectId}/visits/{visitId}/dispatches` (existing review & send). Messages say "As of <date> … still pending" instead of "At our site visit". |
 | `site_visits.kind` | `'site'` (classic) or `'office'` (follow-up rounds). |
+
+## 11. Product tracking (v3, VTech 2026-10-30, sheet revision 11:50) — replaces master-list picking for new projects
+Source of truth: Google Sheet **"Ashutosh Project Status" → tab "Hansal"** (columns: Products, Location, Dependency 1…14),
+extracted to `supabase/seed/products.csv` + `product_steps.csv` → `scripts/gen-catalogue.mjs` → `supabase/seed/catalogue.sql`.
+**27 products, 163 steps.** Re-run the extraction whenever VTech edits the sheet (Claude does this).
+
+**Flow (unchanged from this morning):** New project (name, client, site) → Floors → Rooms → Agencies (**External** + **Internal team**) →
+Room-wise products (product + location) → Escalation → Hub. Only the dependency list and who owns each dependency come from the sheet.
+
+**Model.** A room gets products (Keypad, Curtain, Speakers, Off Termination…) with a location (Entrance/Bedside…, Sheer/Heavy/Roller/Roman,
+Ceiling/Wall…; free text allowed). Each product brings its fixed chain of steps. Every step is a normal `dependency_items` row
+(Hub, Pending, reminders, history, PDF all keep working), linked by `room_product_id` + `step_id`.
+
+**Colour legend (sheet rows 36–40) → owner:**
+| Colour | Legend text | `responsibility` | Default agency type | Phase |
+|---|---|---|---|---|
+| green `D9EAD3` | Other agencies | external | by step: cable/ferrule/readiness→Electrician, dustfree→Painter, engraving/opening→Architect, other-vendor schedule→Curtain/AC Vendor, delivery→Client | 1 |
+| blue `C9DAF8` (+ `CFE2F3` Fabric installation) | Other agencies | external | carpenter→Carpenter, ferrule→Electrician, partial/complete installation→Electrician, internet activation→Network Agency, fabric→Curtain Vendor, client impressions/scene setting/AMC intro→Client | 2 |
+| dark red `E06666` | Installers | internal | VTech Installers | 2 |
+| light red `F4CCCC` | Programmers | internal | VTech Programmers | 2 |
+| orange `F9CB9C` | Project managers | internal | VTech Project Managers | 2 |
+
+**Gating (Vipul's rule).** Per product placed in a room: all green steps are open at once (several can be Pending together).
+**Every other colour stays locked until all green steps of that product are Done or N.A.; then all of them open together.**
+Locked steps can't be set Pending/Done (`set_item_status` raises `locked: …`); N.A. is always allowed. Lock state comes only from view `item_gate`.
+(Products with no green steps — iPhone programming, Client Side — are open from the start.)
+
+**Who gets chased.** Each step waits on an agency (default from the table above; the PM can reassign per item).
+- External agency → reminder to that agency (email + WhatsApp), as today.
+- Internal team → reminder with `[Internal]` in the subject and no agency terms footer.
+- Agency of type **Client** → **never chased**; `item_gate.waits_on_client = true`; shown under "Waiting on client" and in reports.
+
+**Backend calls (migration 0007 — 72 SQL checks):**
+| Call | Does |
+|---|---|
+| tables `product_catalogue` / `product_steps` | catalogue; admins edit, everyone reads |
+| `rpc('add_room_product', {p_project, p_room, p_product, p_location, p_quantity, p_note})` | places a product, creates its steps (unchecked). `p_room` null for project-scope products → room "Project-wide / Handover & client". Returns `room_products.id` |
+| `rpc('remove_room_product', {p_room_product})` | removes product + its steps |
+| view `item_gate` | `item_id, room_product_id, title, location, seq, label, phase, responsibility, gate, status, locked, waits_on_client` |
+| `rpc('item_is_locked', {p_item})` | boolean |
+| `rpc('set_item_status', …)` | unchanged signature, enforces the gate |
+| `copy_floor` | also copies placed products (fresh steps) |
+| `agency_types.internal` | true for VTech, VTech Installers, VTech Programmers, VTech Project Managers |
+| `POST /api/projects/{id}/reminders` | unchanged; skips Client-agency items (warning), `[Internal]` wording for internal teams |
+
+**Defaults to confirm with VTech:** "Delivery pending client / VTECH" defaults to the Client agency (so it is reported, not chased; the PM
+reassigns to VTech Installers when VTech owes the delivery); blue partial/complete lighting installation → Electrician; Fabric installation's
+lighter blue treated as blue; Wi-Fi locations extended to Ceiling/Room/Hall/Entrance/External.

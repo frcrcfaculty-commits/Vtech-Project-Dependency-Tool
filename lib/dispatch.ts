@@ -20,7 +20,7 @@ interface ItemRow {
 }
 interface AgencyRow {
   id: string; company_name: string; escalation_enabled: boolean;
-  agency_types: One<{ name: string }>;
+  agency_types: One<{ name: string; internal: boolean }>;
   agency_contacts: { id: string; name: string; designation: string; level: number; email: string | null; phone: string | null; active: boolean }[];
 }
 
@@ -44,7 +44,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
 
   const [{ data: project }, { data: agencies }, { data: items }] = await Promise.all([
     db.from('projects').select('name, client_name, terms, l2_after, l3_after, mgmt_cc_level').eq('id', visit.project_id).single(),
-    db.from('agencies').select('id, company_name, escalation_enabled, agency_types(name), agency_contacts(id, name, designation, level, email, phone, active)')
+    db.from('agencies').select('id, company_name, escalation_enabled, agency_types(name, internal), agency_contacts(id, name, designation, level, email, phone, active)')
       .eq('project_id', visit.project_id),
     db.from('dependency_items')
       .select('id, agency_id, first_raised_on, reminder_count, note, rooms!inner(name, sort, floors!inner(label, sort)), project_dependencies!inner(text, seq)')
@@ -62,6 +62,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
   const byAgency = new Map<string, ReportItem[]>();
   const onlyAgencies = opts.agencyIds?.length ? new Set(opts.agencyIds) : null;
   const onlyItems = opts.itemIds?.length ? new Set(opts.itemIds) : null;
+  let clientSkipped = 0;
   for (const r of (items ?? []) as ItemRow[]) {
     if (onlyItems && !onlyItems.has(r.id)) continue;
     if (onlyAgencies && (!r.agency_id || !onlyAgencies.has(r.agency_id))) continue;
@@ -80,6 +81,8 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
     const list = byAgency.get(a.id);
     if (!list?.length) continue;
     const typeName = one(a.agency_types).name;
+    // Items waiting on the client are reported, never chased by reminder (VTech's rule).
+    if (typeName === 'Client') { clientSkipped += list.length; continue; }
     const contacts: Contact[] = a.agency_contacts.map((c) => ({ ...c, level: c.level as Level }));
     const report = buildAgencyReport({
       project: {
@@ -88,7 +91,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
       },
       visitDate: visit.visit_date,
       occasion: visit.kind === 'office' ? 'follow_up' : 'site_visit',
-      agency: { companyName: a.company_name, typeName, escalationEnabled: a.escalation_enabled, contacts },
+      agency: { companyName: a.company_name, typeName, escalationEnabled: a.escalation_enabled, contacts, internal: !!one(a.agency_types).internal },
       pm: { name: me.fullName, email: me.email, phone: me.phone },
       management: ((mgmt ?? []) as { full_name: string; email: string }[]).map((m) => ({ name: m.full_name, email: m.email })),
       items: list,
@@ -112,6 +115,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
       result.dispatches.push({ id: row.id, agency: `${typeName} – ${a.company_name}`, channel: d.channel, level: report.level, itemCount: list.length });
     }
   }
+  if (clientSkipped) warnings.push(`${clientSkipped} item${clientSkipped === 1 ? '' : 's'} waiting on the client — not sent as reminders (shown in reports).`);
   return result;
 }
 
