@@ -825,7 +825,7 @@ function HubContent() {
 
         {/* ───────────────────────── SECTION 2: PROJECT OVERVIEW BAR ───────────────────────── */}
         {selectedProject && (
-          <div className="rounded-2xl border border-border bg-surface p-4 shadow-xs space-y-4">
+          <div className="rounded-2xl border border-border bg-surface p-4 shadow-xs space-y-4 overflow-hidden">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-border/60 pb-3">
               <div>
                 <div className="flex items-center gap-2">
@@ -902,15 +902,15 @@ function HubContent() {
 
             {/* Filter Controls Bar */}
             <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold text-text-secondary">Filter by:</span>
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto min-w-0">
+                <span className="font-semibold text-text-secondary shrink-0">Filter by:</span>
 
                 {/* Status Dropdown */}
                 <select
                   aria-label="Filter dependencies by status"
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as unknown as typeof statusFilter)}
-                  className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-text-primary focus:border-accent"
+                  className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-text-primary focus:border-accent max-w-full min-w-0"
                 >
                   <option value="all">All Statuses ({items.length})</option>
                   <option value="pending">Pending ({selectedProjectMetrics.pending})</option>
@@ -925,7 +925,7 @@ function HubContent() {
                   aria-label="Filter dependencies by contractor"
                   value={agencyFilter}
                   onChange={(e) => setAgencyFilter(e.target.value)}
-                  className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-text-primary focus:border-accent"
+                  className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-text-primary focus:border-accent max-w-full min-w-0 truncate"
                 >
                   <option value="all">All Contractors</option>
                   <option value="unassigned">⚠️ Unassigned ({selectedProjectMetrics.unassigned})</option>
@@ -940,7 +940,7 @@ function HubContent() {
                 <button
                   type="button"
                   onClick={() => setActionableOnly(!actionableOnly)}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors max-w-full min-w-0 ${
                     actionableOnly
                       ? 'border-accent bg-accent/10 text-accent ring-1 ring-accent/30'
                       : 'border-border bg-surface text-text-secondary hover:text-text-primary'
@@ -954,7 +954,7 @@ function HubContent() {
               </div>
 
               {/* Status Counters */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {selectedProjectMetrics.escalated > 0 && (
                   <span className="rounded-md bg-danger-light px-2 py-0.5 text-xs font-bold text-danger">
                     {selectedProjectMetrics.escalated} Escalated (L2+)
