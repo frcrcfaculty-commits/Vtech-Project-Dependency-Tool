@@ -1,8 +1,9 @@
 // Demo data: "Demo – Shah Residence", mirroring the Specimen tab of the "Vtech Project Dependency" sheet.
 // Usage: npx tsx --env-file=.env.local scripts/seed-demo.ts
 //
-// Idempotent: deletes the two demo projects (by exact name) and recreates them. Touches nothing else.
+// Idempotent: deletes the three demo projects (by exact name) and recreates them. Touches nothing else.
 // Second project "Demo – Mehta Villa" (office mode, v2) is built only via add_room_dependencies + set_item_status.
+// Third project "Demo – Gandhi Residency 2" (product tracking, v3) is built only via add_room_product + set_item_status.
 // Uses the service-role key (scripts only — never ship this key to app/** or the browser).
 // Goes through the real RPCs (add_master_dependencies, apply_dependencies, finalize_visit) so the
 // data looks exactly like data entered through the app.
@@ -363,4 +364,182 @@ console.log(`  PM member: ${DEMO_PM_EMAIL}. Drafts are not pre-built: open the v
   console.log(`created "${NAME}" (${mid})`);
   console.log(`  floors 1 · rooms ${ROOMS.length} · agencies ${MAG.length} · items ${fin.length} (pending ${c('pending')}, complete ${c('complete')}, na ${c('na')}) · ` +
     `reminded ${fin.filter((i) => i.reminder_count > 0).length} (max ${Math.max(...fin.map((i) => i.reminder_count))}) · history events ${ev.count}`);
+}
+
+// ═════════════ Product tracking demo (v3): "Demo – Gandhi Residency 2" ═════════════
+// Built ONLY through add_room_product + set_item_status, signed in as the PM lead. Products and their step chains come
+// from the catalogue (migration 0007, sheet "Ashutosh Project Status" → "Hansal"). Gate rule: a product's green
+// (phase 1) steps are open together; every other step unlocks once all greens are Done/N.A., so statuses are applied
+// greens first, then phase 2, in date order. Steps not listed in PLAN stay unchecked.
+{
+  const NAME = 'Demo – Gandhi Residency 2';
+  const LEAD_EMAIL = process.env.DEMO_LEAD_EMAIL ?? 'hansalgandhi+pmlead@gmail.com';
+  const LEAD_PASSWORD = process.env.DEMO_LEAD_PASSWORD ?? process.env.E2E_LEAD_PASSWORD;
+  const istDay = (ago: number) => new Date(Date.now() + 5.5 * 3600_000 - ago * 86_400_000).toISOString().slice(0, 10);
+
+  const del3 = await db.from('projects').delete().eq('name', NAME).select('id');
+  if (del3.error) throw new Error(`delete old ${NAME}: ${del3.error.message}`);
+
+  const lead = must<Rec>(await db.from('profiles').select('id').eq('email', LEAD_EMAIL).single(), `lead ${LEAD_EMAIL}`);
+  let office = db;
+  if (LEAD_PASSWORD) {
+    office = createClient(url!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
+    const { error } = await office.auth.signInWithPassword({ email: LEAD_EMAIL, password: LEAD_PASSWORD });
+    if (error) throw new Error(`sign in ${LEAD_EMAIL}: ${error.message}`);
+  } else {
+    console.warn(`  (no DEMO_LEAD_PASSWORD/E2E_LEAD_PASSWORD: building ${NAME} with the service role; history has no author)`);
+  }
+
+  const gid = must<Rec>(await office.from('projects').insert({
+    name: NAME, client_name: 'Gandhi family (demo)', site_address: 'Demo duplex, Palghar (W)', created_by: lead.id,
+  }).select('id').single(), 'insert Gandhi project').id;
+  const FL: Record<string, string[]> = {
+    'Ground Floor': ['Living Room', 'Dining', 'Kitchen'],
+    'First Floor': ['Master Bedroom', 'Kids Bedroom', 'Home Office'],
+  };
+  const gRooms: Rec[] = [];
+  let fs = 0;
+  for (const [label, rooms] of Object.entries(FL)) {
+    const f = must<Rec>(await office.from('floors').insert({ project_id: gid, label, sort: ++fs }).select('id').single(), `Gandhi floor ${label}`);
+    gRooms.push(...must(await office.from('rooms').insert(rooms.map((name, i) => ({ project_id: gid, floor_id: f.id, name, sort: i + 1 })))
+      .select('id,name'), `Gandhi rooms ${label}`));
+  }
+  const gRoom = (n: string) => gRooms.find((r) => r.name === n)!.id;
+
+  // External agencies + internal VTech teams (agencies first, so add_room_product assigns every step to one).
+  const GAG: { type: string; company: string; contacts: Contact[] }[] = [
+    { type: 'Electrician', company: 'Demo Palghar Power Works', contacts: [
+      { name: 'Ramesh Patil', designation: 'Supervisor', level: 1, phone: '+919000000801', email: 'ramesh@palgharpower.example.com' },
+      { name: 'Dinesh Vartak', designation: 'Owner', level: 3, phone: '+919000000803', email: 'dinesh@palgharpower.example.com' } ] },
+    { type: 'Painter', company: 'Demo ColourCraft Painters', contacts: [
+      { name: 'Salim Shaikh', designation: 'Contractor', level: 1, phone: '+919000000811', email: 'salim@colourcraft.example.com' } ] },
+    { type: 'Architect', company: 'Demo Studio Axis Architects', contacts: [
+      { name: 'Nisha Desai', designation: 'Project Architect', level: 1, phone: '+919000000821', email: 'nisha@studioaxis.example.com' },
+      { name: 'Kunal Joshi', designation: 'Principal', level: 3, email: 'kunal@studioaxis.example.com' } ] },
+    { type: 'Curtain Vendor', company: 'Demo Drape House', contacts: [
+      { name: 'Farhan Ali', designation: 'Fitter', level: 1, phone: '+919000000831', email: 'farhan@drapehouse.example.com' } ] },
+    { type: 'Carpenter', company: 'Demo Woodline Interiors', contacts: [
+      { name: 'Mahesh Suthar', designation: 'Head Carpenter', level: 1, phone: '+919000000841' },
+      { name: 'Jignesh Mistry', designation: 'Owner', level: 3, phone: '+919000000843', email: 'jignesh@woodline.example.com' } ] },
+    { type: 'Network Agency', company: 'Demo FiberNet Palghar', contacts: [
+      { name: 'Vivek Naik', designation: 'Field Engineer', level: 1, phone: '+919000000851', email: 'vivek@fibernet.example.com' } ] },
+    { type: 'Client', company: 'Gandhi family (demo client)', contacts: [
+      { name: 'Mr. Gandhi (demo)', designation: 'Home owner', level: 1, phone: '+919000000861', email: 'owner@gandhi-demo.example.com' } ] },
+    { type: 'VTech Installers', company: 'VTech Installers', contacts: [
+      { name: 'Santosh (demo installer)', designation: 'Lead Installer', level: 1, phone: '+919000000871', email: 'installers@vtech-demo.example.com' },
+      { name: 'Ajay (demo installer)', designation: 'Installer', level: 2, phone: '+919000000872' } ] },
+    { type: 'VTech Programmers', company: 'VTech Programmers', contacts: [
+      { name: 'Priya (demo programmer)', designation: 'Programmer', level: 1, phone: '+919000000881', email: 'programmers@vtech-demo.example.com' } ] },
+    { type: 'VTech Project Managers', company: 'VTech Project Managers', contacts: [
+      { name: 'Rohan (demo PM)', designation: 'Project Manager', level: 1, phone: '+919000000891', email: 'pm@vtech-demo.example.com' },
+      { name: 'Sneha (demo PM)', designation: 'Senior PM', level: 2, email: 'seniorpm@vtech-demo.example.com' } ] },
+  ];
+  for (const a of GAG) {
+    const ag = must<Rec>(await office.from('agencies').insert({ project_id: gid, agency_type_id: typeId(a.type), company_name: a.company })
+      .select('id').single(), `Gandhi agency ${a.type}`);
+    must(await office.from('agency_contacts').insert(a.contacts.map((c) => ({
+      project_id: gid, agency_id: ag.id, name: c.name, designation: c.designation, level: c.level, phone: c.phone ?? null, email: c.email ?? null,
+    }))).select('id'), `Gandhi contacts ${a.type}`);
+  }
+
+  // Step states keyed by step label: P = pending (raised N days ago, optional note), D = done N days ago, X = N.A.
+  type S = ['P' | 'D', number, string?] | ['X', string?];
+  const DLV = 'Delivery pending client / VTECH';
+  const greensDone = (labels: string[], ago: number): Record<string, S> => Object.fromEntries(labels.map((l) => [l, ['D', ago] as S]));
+  const PLAN: { room: string | null; product: string; location?: string; steps: Record<string, S> }[] = [
+    // Still in green, 2–3 greens pending at once
+    { room: 'Living Room', product: 'Keypad', location: 'Entrance', steps: {
+      'Engraving submitted': ['P', 12, 'Engraving text not yet approved.'], [DLV]: ['D', 9],
+      'Readiness to install': ['P', 6], 'Readiness of dustfree': ['P', 4, 'Final paint coat on this wall pending.'] } },
+    { room: 'Living Room', product: 'Curtain', location: 'Sheer', steps: {
+      'Schedule from the other vendor': ['P', 10], [DLV]: ['D', 8], 'Opening details': ['D', 7],
+      'Readiness of cable': ['P', 5], 'Readiness of dustfree': ['X', 'No painting near this window.'] } },
+    { room: 'Home Office', product: 'Wifi Access point', location: 'Ceiling', steps: {
+      [DLV]: ['D', 6], 'Readiness of cable': ['P', 5], 'Readiness to install': ['P', 5] } },
+    { room: 'Kids Bedroom', product: 'Speakers', location: 'Wall', steps: { 'Readiness of cable': ['P', 3] } },
+    // Green step waiting on the client (reported, never chased)
+    { room: 'Dining', product: 'Off Termination', location: 'Main DB location', steps: { [DLV]: ['P', 15, 'Client to confirm delivery date.'] } },
+    // Unlocked: Installation pending
+    { room: 'Master Bedroom', product: 'Keypad', location: 'Bedside', steps: {
+      ...greensDone(['Engraving submitted', DLV, 'Readiness to install', 'Readiness of dustfree'], 8), Installation: ['P', 3] } },
+    { room: 'Living Room', product: 'Speakers', location: 'Ceiling', steps: {
+      ...greensDone([DLV, 'Readiness of cable', 'Readiness to install'], 9), Installation: ['P', 4, 'Speakers on site; team booked.'] } },
+    { room: 'Kitchen', product: 'Sensor sada', location: 'Ceiling', steps: {
+      ...greensDone([DLV, 'Readiness of cable', 'Readiness to install'], 7), Installation: ['P', 2] } },
+    { room: 'Kitchen', product: 'Fan control', location: 'Main DB location', steps: {
+      ...greensDone([DLV, 'Readiness to install'], 6), 'Readiness of dustfree': ['X'], Installation: ['D', 3], Configuration: ['P', 1] } },
+    // Blue: door lock waiting on the carpenter
+    { room: 'Master Bedroom', product: 'Door lock', location: 'Door frame', steps: {
+      ...greensDone([DLV, 'Readiness of cable', 'Readiness to install'], 10), 'Readiness by carpenter': ['P', 7, 'Lock cutout in door frame not done.'] } },
+    // Blue: curtain fabric with the curtain vendor
+    { room: 'Master Bedroom', product: 'Curtain', location: 'Heavy', steps: {
+      ...greensDone(['Schedule from the other vendor', DLV, 'Opening details', 'Readiness of cable', 'Readiness of dustfree'], 14),
+      Installation: ['D', 6], 'Fabric installation': ['P', 5] } },
+    // Dimmer on "Scene setting" (waits on client)
+    { room: 'Living Room', product: 'Dimmer dali', location: 'Main DB location', steps: {
+      ...greensDone([DLV, 'Readiness to install', 'Readiness of dustfree'], 20), Installation: ['D', 15], Configuration: ['D', 13],
+      'Partial installation done': ['D', 11], 'Light addressing (partial)': ['D', 9], 'Complete installation': ['D', 6],
+      'Scene setting': ['P', 4, 'Waiting for client to choose scenes.'] } },
+    // Switch/Router on "Internet activation" (Network Agency)
+    { room: 'Home Office', product: 'Switch /Router', location: 'AV Rack', steps: {
+      ...greensDone([DLV, 'Readiness of cable', 'Readiness of dustfree'], 12), Installation: ['D', 8], Configuration: ['D', 6],
+      'Internet activation': ['P', 5, 'ISP visit not yet scheduled.'] } },
+    // Freshly placed / barely started
+    { room: 'Kids Bedroom', product: 'Keypad', location: 'Bedside', steps: {} },
+    { room: 'Kids Bedroom', product: 'Curtain', location: 'Roller', steps: {} },
+    { room: 'Home Office', product: 'Camera', location: 'Ceiling', steps: { [DLV]: ['D', 2] } },
+    { room: 'Living Room', product: 'Sensor Intelligent', location: 'Ceiling', steps: {} },
+    { room: 'Dining', product: 'Wall panel', location: 'Entrance', steps: { 'Readiness to install': ['P', 2] } },
+    // Project-wide products (no green steps: open from the start)
+    { room: null, product: 'iPhone programming', steps: { Configuration: ['P', 2] } },
+    { room: null, product: 'Client Side', steps: { 'As built drawing': ['P', 3], 'Roomwise BOQ': ['D', 1] } },
+  ];
+
+  const catalogue = must(await office.from('product_catalogue').select('id,title'), 'product catalogue');
+  const productId = (t: string) => {
+    const p = catalogue.find((x) => x.title === t);
+    if (!p) throw new Error(`product missing: ${t}`);
+    return p.id;
+  };
+  type GI = { id: string; agency_id: string | null; product_steps: { label: string; phase: number } };
+  const ops: { item: string; phase: number; ago: number; status: string; note?: string; label: string }[] = [];
+  for (const p of PLAN) {
+    const rp = must<string>(await office.rpc('add_room_product', {
+      p_project: gid, p_room: p.room ? gRoom(p.room) : null, p_product: productId(p.product), p_location: p.location ?? null, p_quantity: 1, p_note: null,
+    }), `add_room_product ${p.product}`);
+    const its = must(await office.from('dependency_items').select('id, agency_id, product_steps(label, phase)').eq('room_product_id', rp),
+      `steps ${p.product}`) as unknown as GI[];
+    if (its.some((i) => !i.agency_id)) throw new Error(`Gandhi: ${p.product} has a step without an agency`);
+    for (const [label, st] of Object.entries(p.steps)) {
+      const it = its.find((i) => i.product_steps.label === label);
+      if (!it) throw new Error(`Gandhi: step "${label}" not in ${p.product}`);
+      if (st[0] === 'X') ops.push({ item: it.id, phase: it.product_steps.phase, ago: 30, status: 'na', note: st[1], label });
+      else ops.push({ item: it.id, phase: it.product_steps.phase, ago: st[1], status: st[0] === 'P' ? 'pending' : 'complete', note: st[2], label });
+    }
+  }
+  // Greens first, then phase 2; oldest first within a phase. Done steps are raised first, then closed (2 history events).
+  ops.sort((a, b) => a.phase - b.phase || b.ago - a.ago);
+  for (const o of ops) {
+    if (o.status === 'complete') {
+      must(await office.rpc('set_item_status', { p_item: o.item, p_status: 'pending', p_date: istDay(o.ago + 3), p_note: null, p_photo: null }), `raise ${o.label}`);
+    }
+    must(await office.rpc('set_item_status', { p_item: o.item, p_status: o.status, p_date: istDay(o.ago), p_note: o.note ?? null, p_photo: null }),
+      `set_item_status ${o.label} ${o.status}`);
+  }
+  if (LEAD_PASSWORD) await office.auth.signOut();
+
+  const gate = must(await db.from('item_gate').select('status, locked, waits_on_client, responsibility').eq('project_id', gid), 'Gandhi gate') as unknown as
+    { status: string; locked: boolean; waits_on_client: boolean; responsibility: string }[];
+  const pend = gate.filter((g) => g.status === 'pending');
+  const lanes = {
+    external: pend.filter((g) => !g.waits_on_client && g.responsibility !== 'internal').length,
+    internal: pend.filter((g) => !g.waits_on_client && g.responsibility === 'internal').length,
+    client: pend.filter((g) => g.waits_on_client).length,
+  };
+  const c = (s: string) => gate.filter((g) => g.status === s).length;
+  console.log(`created "${NAME}" (${gid})`);
+  console.log(`  floors 2 (+ Project-wide) · rooms ${gRooms.length} · agencies ${GAG.length} · products ${PLAN.length} · steps ${gate.length} ` +
+    `(pending ${c('pending')}, complete ${c('complete')}, na ${c('na')}, unchecked ${c('unchecked')}; locked ${gate.filter((g) => g.locked).length})`);
+  console.log(`  lanes: external ${lanes.external} · internal ${lanes.internal} · waiting on client ${lanes.client}`);
+  if (!lanes.external || !lanes.internal || !lanes.client) throw new Error('Gandhi: a lane is empty');
 }
