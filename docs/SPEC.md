@@ -115,3 +115,52 @@ reachable as "Site visit mode (classic)". Do not delete them: they are the basis
 | table `item_events` | History per item (status, date, note, photo, source office/visit, who, when). RLS by project. |
 | `POST /api/projects/{projectId}/reminders` `{agencyIds?, itemIds?}` | Opens an office follow-up round and builds drafts for the chosen pending items. Returns `{visitId, dispatches, warnings}`; `visitId` is null when nothing to send. Then open `/projects/{projectId}/visits/{visitId}/dispatches` (existing review & send). Messages say "As of <date> … still pending" instead of "At our site visit". |
 | `site_visits.kind` | `'site'` (classic) or `'office'` (follow-up rounds). |
+
+## 11. Product tracking (v3, VTech 2026-10-30) — replaces master-list picking for new projects
+Source of truth: Google Sheet **"Ashutosh Project Status" → tab "Hansal"** (owner vikrammhatrevtech@gmail.com), extracted to
+`supabase/seed/products.csv` + `product_steps.csv` → `scripts/gen-catalogue.mjs` → `supabase/seed/catalogue.sql`.
+
+**Model.** A room gets *products* VTech sells (column A "Title": Keypad, Curtain, Speakers…) with a *location* (column B:
+Entrance/Bedside…, Sheer/Heavy/Roller/Roman, Ceiling/Wall…; free text allowed). Each product brings its fixed chain of *steps*
+(columns D…P). Every step becomes a normal `dependency_items` row (so Hub, Pending, reminders, history, PDF all keep working),
+linked by `room_product_id` + `step_id`, with `responsibility`.
+
+**Colour → owner (legend rows 35–39 of the sheet):**
+| Sheet colour | Meaning | `responsibility` | Default agency type | Phase |
+|---|---|---|---|---|
+| green `D9EAD3` | other agencies (electrician, painter, architect…) | external | by step (cable→Electrician, dustfree→Painter, …) | 1 |
+| dark red `E06666` | VTech **Installers** | internal | VTech Installers | 2 |
+| light red `F4CCCC` | VTech **Programmers** | internal | VTech Programmers | 2 |
+| orange `F9CB9C` | VTech **Project managers** (handover docs) | internal | VTech Project Managers | 2 |
+| blue `C9DAF8` | **client** (scene setting, internet activation, AMC intro…) | client | Client | 2 |
+| light blue `CFE2F3` (only "Fabric installation") | not in legend → treated as curtain vendor | external | Curtain Vendor | 2 |
+
+**Gating (the rule Vipul asked for).** Per product placed in a room:
+- Phase 1 (green) steps are all open at once; several can be Pending together.
+- Phase 2 steps are **locked** until every phase-1 step of that product is Done or N.A.
+- `gate='after_previous'` phase-2 steps also wait for the earlier phase-2 steps (Installation → Configuration → Programming).
+  Orange handover docs use `after_external` (parallel once greens are done).
+- Locked steps cannot be set Pending/Done (`set_item_status` raises `locked: …`); N.A. is always allowed.
+- View `item_gate` (RLS-safe) gives `locked` per item.
+
+**Reminders.** External → agency email/WhatsApp as today. Internal → same engine, subject `[Internal]`, no agency terms footer.
+Client (blue) → **never sent**; counted in a warning and shown in reports as "waiting on client".
+
+**Agencies screen.** Two sections: *External agencies* (`agency_types.internal=false`) and *Internal team*
+(`internal=true`: VTech Installers, VTech Programmers, VTech Project Managers, VTech). Same contacts/levels/escalation.
+
+**Backend calls (migration 0007 — tested, 71 SQL checks):**
+| Call | Does |
+|---|---|
+| table `product_catalogue` (26) / `product_steps` (151) | catalogue; admins edit, everyone reads |
+| `rpc('add_room_product', {p_project, p_room, p_product, p_location, p_quantity, p_note})` | places a product, creates its steps (unchecked). `p_room` null for project-scope products (iPhone programming, Client Side) → auto room "Project-wide / Handover & client". Returns `room_products.id` |
+| `rpc('remove_room_product', {p_room_product})` | removes product + its steps |
+| view `item_gate` | `item_id, room_product_id, title, location, seq, label, phase, responsibility, gate, status, locked` |
+| `rpc('item_is_locked', {p_item})` | boolean |
+| `rpc('set_item_status', …)` | unchanged signature, now enforces the gate |
+| `copy_floor` | also copies placed products (fresh steps) |
+| `POST /api/projects/{id}/reminders` | unchanged; skips client steps, internal wording for internal agencies |
+
+**Decisions taken by default (confirm with VTech):** gating is per product instance (not whole project); phase-2 order follows sheet
+columns; "Delivery pending client / VTECH" defaults to agency type Client (PM can reassign); "Fabric installation" treated as external
+curtain vendor; Wi-Fi locations extended to Ceiling/Room/Hall/Entrance/External; the 78-item master list stays for custom/on-the-go use.

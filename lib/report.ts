@@ -25,7 +25,8 @@ export interface ReportInput {
   visitDate: string; // ISO date
   /** 'site_visit' (default): "At our site visit on …". 'follow_up': office reminder, "As of …, still pending". */
   occasion?: 'site_visit' | 'follow_up';
-  agency: { companyName: string; typeName: string; escalationEnabled: boolean; contacts: Contact[] };
+  /** internal = VTech's own team: subject marked [Internal], no agency terms footer. */
+  agency: { companyName: string; typeName: string; escalationEnabled: boolean; contacts: Contact[]; internal?: boolean };
   pm: { name: string; email: string; phone: string | null };
   management: { name: string; email: string }[];
   items: ReportItem[];
@@ -63,6 +64,8 @@ const location = (i: ReportItem) => `${i.floorLabel} – ${i.roomName}`;
 export function buildAgencyReport(input: ReportInput): BuiltReport {
   const { project, agency, items, visitDate, pm } = input;
   const followUp = input.occasion === 'follow_up';
+  const internal = !!input.agency.internal;
+  const terms = internal ? '' : project.terms;
   const policy = project.policy;
   const warnings: string[] = [];
 
@@ -76,7 +79,7 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
   const level = withLevels.reduce<Level>((m, i) => (i.level > m ? i.level : m), 1);
   const maxReminder = withLevels.reduce((m, i) => Math.max(m, i.reminderNo), 1);
 
-  const tag = level >= 2 ? ` [ESCALATION L${level}]` : '';
+  const tag = (internal ? ' [Internal]' : '') + (level >= 2 ? ` [ESCALATION L${level}]` : '');
   const subject =
     `${tag ? tag.trim() + ' ' : ''}${project.name}: ${withLevels.length} pending item${withLevels.length === 1 ? '' : 's'} ` +
     `for ${agency.typeName} (${agency.companyName}) – reminder #${maxReminder} – ${formatDate(visitDate)}`;
@@ -105,7 +108,7 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
         `${n + 1}. ${location(i)}: ${i.text} — first raised ${formatDate(i.firstRaisedOn)}, reminder #${i.reminderNo}` +
         (i.note ? ` (${i.note})` : '')),
       '',
-      project.terms,
+      terms,
       '',
       `Regards,`,
       `${pm.name}`,
@@ -160,7 +163,7 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
           </tbody>
         </table>
       </td></tr>
-      <tr><td style="padding:12px 16px 0 16px;${F};font-size:12px;line-height:17px;color:#344054;white-space:pre-line">${esc(project.terms)}</td></tr>
+      <tr><td style="padding:12px 16px 0 16px;${F};font-size:12px;line-height:17px;color:#344054;white-space:pre-line">${esc(terms)}</td></tr>
       <tr><td style="padding:16px 16px 22px 16px;${F};font-size:14px;line-height:20px;color:#1a1a1a">Regards,<br><b>${esc(pm.name)}</b><br>VTech Technologies${pm.phone ? ` | ${esc(pm.phone)}` : ''}</td></tr>
     </table>
   </td></tr>
@@ -183,7 +186,9 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
     const head =
       `*VTech – ${project.name}*${level >= 2 ? `  ⚠️ Escalation L${level}` : ''}\n` +
       `${followUp ? 'Status as of' : 'Site visit'} ${formatDate(visitDate)}: ${withLevels.length} pending ${agency.typeName.toLowerCase()} item${withLevels.length === 1 ? '' : 's'} (${agency.companyName}).\n\n`;
-    const foot = `\n\nPlease complete at the earliest. Once addressed, VTech needs 2–4 days to finish automation work. Kindly protect installed automation devices.\n– ${pm.name}, VTech`;
+    const foot = internal
+      ? `\n\nPlease close these at the earliest and update ${pm.name}.\n– ${pm.name}, VTech`
+      : `\n\nPlease complete at the earliest. Once addressed, VTech needs 2–4 days to finish automation work. Kindly protect installed automation devices.\n– ${pm.name}, VTech`;
     let body = '';
     let shown = 0;
     for (const [n, i] of withLevels.entries()) {

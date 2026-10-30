@@ -277,4 +277,45 @@ exception when others then if sqlerrm not like '%no access%' then raise; end if;
 end $$;
 reset role;
 
+-- ── 0007 product tracking ──
+select pg_temp.assert((select count(*) from public.product_catalogue) = 26, '26 products from the Hansal sheet');
+select pg_temp.assert((select count(*) from public.product_steps) = 151, '151 product steps');
+select pg_temp.assert((select count(*) from public.agency_types where internal) = 4, '4 internal agency types');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+set role authenticated;
+create temp table t_sp as select id from public.product_catalogue where title = 'Speakers';
+create temp table t_rp as select public.add_room_product((select id from public.projects limit 1), (select id from t_room), (select id from t_sp), 'Ceiling') as id;
+create temp table t_g as select * from public.item_gate where room_product_id = (select id from t_rp);
+select pg_temp.assert((select count(*) from t_g) = 4, 'speaker placed: 4 steps created');
+select pg_temp.assert((select string_agg(label || ':' || locked, ',' order by seq) from t_g)
+  = 'Delivery pending client / VTECH:false,Readiness to install:false,Installation:true,Sound testing:true', 'green steps open, red steps locked');
+create temp table t_s as select item_id, seq from public.item_gate where room_product_id = (select id from t_rp);
+select public.set_item_status((select item_id from t_s where seq=1), 'pending');
+select public.set_item_status((select item_id from t_s where seq=2), 'pending');
+select pg_temp.assert((select count(*) from public.dependency_items where room_product_id=(select id from t_rp) and status='pending') = 2, 'two green steps pending at the same time');
+do $$ begin
+  perform public.set_item_status((select item_id from t_s where seq=3), 'complete');
+  raise exception 'should have failed';
+exception when others then if sqlerrm not like 'locked%' then raise; end if; raise notice 'ok - installation blocked while greens open';
+end $$;
+select public.set_item_status((select item_id from t_s where seq=1), 'complete');
+select pg_temp.assert(public.item_is_locked((select item_id from t_s where seq=3)), 'still locked with one green open');
+select public.set_item_status((select item_id from t_s where seq=2), 'na');
+select pg_temp.assert(not public.item_is_locked((select item_id from t_s where seq=3)), 'installation unlocks once all greens done/N.A.');
+select pg_temp.assert(public.item_is_locked((select item_id from t_s where seq=4)), 'sound testing waits for installation');
+select public.set_item_status((select item_id from t_s where seq=3), 'complete');
+select pg_temp.assert(not public.item_is_locked((select item_id from t_s where seq=4)), 'sound testing unlocks after installation');
+select pg_temp.assert((select responsibility from public.dependency_items where id=(select item_id from t_s where seq=3)) = 'internal', 'installation step is internal');
+create temp table t_cp as select public.copy_floor((select floor_id from public.rooms where id=(select id from t_room)), '13th Floor copy') as id;
+select pg_temp.assert((select count(*) from public.room_products rp join public.rooms r on r.id=rp.room_id where r.floor_id=(select id from t_cp)) = 1, 'copy_floor copies placed products');
+select pg_temp.assert((select count(*) from public.dependency_items i join public.rooms r on r.id=i.room_id where r.floor_id=(select id from t_cp) and i.room_product_id is not null and i.status='unchecked') = 4, 'copied product steps start fresh');
+-- project-scope product goes to the project-wide room
+create temp table t_cs as select public.add_room_product((select id from public.projects limit 1), null, (select id from public.product_catalogue where title='Client Side')) as id;
+select pg_temp.assert((select r.name from public.room_products rp join public.rooms r on r.id=rp.room_id where rp.id=(select id from t_cs)) = 'Handover & client', 'project-scope product placed in project-wide room');
+select pg_temp.assert((select count(*) from public.dependency_items where room_product_id=(select id from t_cs) and responsibility='client') = 1, 'AMC team intro is a client step');
+-- remove
+select public.remove_room_product((select id from t_cs));
+select pg_temp.assert((select count(*) from public.dependency_items where room_product_id=(select id from t_cs)) = 0, 'remove_room_product removes its steps');
+reset role;
+
 \echo ALL SQL TESTS PASSED
