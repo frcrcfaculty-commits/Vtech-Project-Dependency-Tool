@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { compressImageToWebP } from '@/lib/client/image';
 import { todayIST } from '@/lib/client/date';
+import { AppHeader } from '@/components/app-header';
 import { getEscalationLevel, isEscalated } from '@/lib/client/escalation';
 
 interface PendingItem {
@@ -724,6 +725,7 @@ export default function PendingPage() {
 
   return (
     <div className="min-h-screen bg-surface-alt pb-28">
+      <AppHeader />
       {/* ───────────────────────── HEADER & STATS ───────────────────────── */}
       <div className="border-b border-border bg-surface px-4 py-5 shadow-xs">
         <div className="mx-auto max-w-5xl">

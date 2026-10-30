@@ -37,8 +37,8 @@ export function AppHeader() {
 
   return (
     <>
-      <header className="glass-bar sticky top-0 z-30 px-4 py-2.5">
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
+      <header className="glass-bar sticky top-0 z-30 px-4 py-2.5 lg:px-8">
+        <div className="mx-auto flex max-w-7xl items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-6">
             <Link
               href="/hub"
