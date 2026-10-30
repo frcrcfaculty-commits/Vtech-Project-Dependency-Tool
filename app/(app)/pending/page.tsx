@@ -12,6 +12,9 @@ interface PendingItem {
   project_id: string;
   room_id: string;
   agency_id: string | null;
+  room_product_id?: string | null;
+  step_id?: string | null;
+  responsibility?: 'external' | 'internal' | 'client' | null;
   status: 'pending';
   first_raised_on: string | null;
   completed_on: string | null;
@@ -20,6 +23,7 @@ interface PendingItem {
   note: string | null;
   photo_path: string | null;
   updated_at: string;
+  waits_on_client?: boolean;
   projects: {
     id: string;
     name: string;
@@ -33,6 +37,7 @@ interface PendingItem {
     floors: {
       id: string;
       label: string;
+      projects?: PendingItem['projects'];
     } | null;
   } | null;
   project_dependencies: {
@@ -41,6 +46,7 @@ interface PendingItem {
     agency_types: {
       id: string;
       name: string;
+      internal?: boolean;
     } | null;
   } | null;
   agencies: {
@@ -49,8 +55,37 @@ interface PendingItem {
     agency_types: {
       id: string;
       name: string;
+      internal?: boolean;
     } | null;
   } | null;
+  room_products?: {
+    id: string;
+    location: string | null;
+    quantity: number;
+    product_catalogue?: {
+      id: string;
+      title: string;
+    } | null;
+  } | null;
+  product_steps?: {
+    id: string;
+    label: string;
+    seq: number;
+    sheet_colour: string | null;
+    responsibility: 'external' | 'internal' | 'client';
+  } | null;
+}
+
+export function formatPendingItemTitle(item: PendingItem): string {
+  const roomName = item.rooms?.name ?? 'Room';
+  if (item.room_products) {
+    const prodTitle = item.room_products.product_catalogue?.title ?? 'Product';
+    const loc = item.room_products.location ? ` (${item.room_products.location})` : '';
+    const stepLabel = item.product_steps?.label ?? item.project_dependencies?.text ?? 'Pending step';
+    return `${roomName} · ${prodTitle}${loc} · ${stepLabel}`;
+  }
+  const depText = item.project_dependencies?.text ?? 'Pending dependency';
+  return `${roomName} · ${depText}`;
 }
 
 interface AgencyContact {
@@ -80,6 +115,9 @@ export default function PendingPage() {
 
   const [items, setItems] = useState<PendingItem[]>([]);
   const [contacts, setContacts] = useState<AgencyContact[]>([]);
+
+  // 3 Lanes: External · Internal · Waiting on client
+  const [activeLane, setActiveLane] = useState<'external' | 'internal' | 'client'>('external');
 
   // Selection
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
@@ -112,6 +150,18 @@ export default function PendingPage() {
   const [sendingReminders, setSendingReminders] = useState<boolean>(false);
   const [whatsAppRowLoadingId, setWhatsAppRowLoadingId] = useState<string | null>(null);
 
+  // Lane classification helper
+  const getItemLane = useCallback((item: PendingItem): 'external' | 'internal' | 'client' => {
+    if (item.waits_on_client) return 'client';
+    const isInternal =
+      item.responsibility === 'internal' ||
+      item.product_steps?.responsibility === 'internal' ||
+      item.agencies?.agency_types?.internal === true ||
+      item.project_dependencies?.agency_types?.internal === true;
+    if (isInternal) return 'internal';
+    return 'external';
+  }, []);
+
   // Load all pending items and active contacts
   const loadPendingData = useCallback(async () => {
     try {
@@ -119,17 +169,16 @@ export default function PendingPage() {
       setError(null);
       const sb = supabaseBrowser();
 
-      const [itemsRes, contactsRes] = await Promise.all([
+      const [itemsRes, contactsRes, gateRes] = await Promise.all([
         sb
           .from('dependency_items')
           .select(
-            // Embed by table name, not column hint: dependency_items' FKs are composite (col, project_id), and
-            // PostgREST cannot resolve `alias:column(...)` hints for composite keys (PGRST200). The project is
-            // reached through rooms → floors → projects and lifted to `projects` below to keep the PendingItem shape.
-            `id, project_id, room_id, agency_id, status, first_raised_on, completed_on, reminder_count, last_reminded_on, note, photo_path, updated_at,
+            `id, project_id, room_id, agency_id, room_product_id, step_id, responsibility, status, first_raised_on, completed_on, reminder_count, last_reminded_on, note, photo_path, updated_at,
              rooms(id, name, floors(id, label, projects(id, name, client_name, l2_after, l3_after))),
-             project_dependencies(id, text, agency_types(id, name)),
-             agencies(id, company_name, agency_types(id, name))`
+             project_dependencies(id, text, agency_types(id, name, internal)),
+             agencies(id, company_name, agency_types(id, name, internal)),
+             room_products(id, location, quantity, product_catalogue(id, title)),
+             product_steps(id, label, seq, sheet_colour, responsibility)`
           )
           .eq('status', 'pending')
           .order('first_raised_on', { ascending: true, nullsFirst: false }),
@@ -138,19 +187,38 @@ export default function PendingPage() {
           .select('id, agency_id, project_id, name, designation, level, phone, email, active')
           .eq('active', true)
           .order('level', { ascending: true }),
+        sb
+          .from('item_gate')
+          .select('item_id, waits_on_client'),
       ]);
 
       if (itemsRes.error) throw itemsRes.error;
       if (contactsRes.error) throw contactsRes.error;
 
+      const clientWaitsSet = new Set(
+        (gateRes.data ?? [])
+          .filter((g: { waits_on_client: boolean }) => g.waits_on_client)
+          .map((g: { item_id: string }) => g.item_id)
+      );
+
       // Type-safe cast of nested Supabase data
       type Raw = Omit<PendingItem, 'projects'> & {
         rooms: (PendingItem['rooms'] & { floors: { id: string; label: string; projects: PendingItem['projects'] } | null }) | null;
       };
-      const rawItems: PendingItem[] = ((itemsRes.data ?? []) as unknown as Raw[]).map((r) => ({
-        ...r,
-        projects: r.rooms?.floors?.projects ?? null,
-      }));
+      const rawItems: PendingItem[] = ((itemsRes.data ?? []) as unknown as Raw[]).map((r) => {
+        const isClient =
+          clientWaitsSet.has(r.id) ||
+          r.agencies?.agency_types?.name === 'Client' ||
+          r.project_dependencies?.agency_types?.name === 'Client' ||
+          r.product_steps?.responsibility === 'client' ||
+          r.responsibility === 'client';
+
+        return {
+          ...r,
+          waits_on_client: isClient,
+          projects: r.rooms?.floors?.projects ?? null,
+        };
+      });
       setItems(rawItems);
       setContacts((contactsRes.data ?? []) as AgencyContact[]);
     } catch (err) {
@@ -210,11 +278,29 @@ export default function PendingPage() {
     };
   }, [items]);
 
+  const laneCounts = useMemo(() => {
+    let external = 0;
+    let internal = 0;
+    let client = 0;
+    for (const item of items) {
+      const lane = getItemLane(item);
+      if (lane === 'external') external++;
+      else if (lane === 'internal') internal++;
+      else client++;
+    }
+    return { external, internal, client };
+  }, [items, getItemLane]);
+
   // Filtered items
   const filteredItems = useMemo(() => {
     const now = Date.now();
 
     return items.filter((item) => {
+      // 3 Lanes Filter (External / Internal / Client)
+      if (getItemLane(item) !== activeLane) {
+        return false;
+      }
+
       // Project filter
       if (projectFilter !== 'all' && item.project_id !== projectFilter) {
         return false;
@@ -249,19 +335,87 @@ export default function PendingPage() {
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
+        const formattedTitle = formatPendingItemTitle(item).toLowerCase();
         const text = item.project_dependencies?.text?.toLowerCase() ?? '';
         const room = item.rooms?.name?.toLowerCase() ?? '';
         const floor = item.rooms?.floors?.label?.toLowerCase() ?? '';
         const proj = item.projects?.name?.toLowerCase() ?? '';
         const agency = item.agencies?.company_name?.toLowerCase() ?? '';
-        if (!text.includes(q) && !room.includes(q) && !floor.includes(q) && !proj.includes(q) && !agency.includes(q)) {
+        if (
+          !formattedTitle.includes(q) &&
+          !text.includes(q) &&
+          !room.includes(q) &&
+          !floor.includes(q) &&
+          !proj.includes(q) &&
+          !agency.includes(q)
+        ) {
           return false;
         }
       }
 
       return true;
     });
-  }, [items, projectFilter, agencyTypeFilter, agencyFilter, escalatedOnly, ageFilter, searchQuery]);
+  }, [items, getItemLane, activeLane, projectFilter, agencyTypeFilter, agencyFilter, escalatedOnly, ageFilter, searchQuery]);
+
+  // Copy plain text status note for client-pending items
+  const handleCopyClientStatusNote = () => {
+    const clientItems = filteredItems;
+    if (clientItems.length === 0) {
+      alert('No client-pending items to summarize.');
+      return;
+    }
+
+    const dateStr = new Date().toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+
+    const lines: string[] = [
+      `VTech Site Tracker — Pending Client Items (${dateStr})`,
+      '-------------------------------------------------------',
+    ];
+
+    const byProject = new Map<string, PendingItem[]>();
+    clientItems.forEach((item) => {
+      const pName = item.projects?.name ?? 'General Project';
+      const arr = byProject.get(pName) ?? [];
+      arr.push(item);
+      byProject.set(pName, arr);
+    });
+
+    byProject.forEach((pItems, pName) => {
+      lines.push(`\nProject: ${pName} (${pItems.length} item${pItems.length === 1 ? '' : 's'})`);
+      pItems.forEach((item) => {
+        const title = formatPendingItemTitle(item);
+        const days = item.first_raised_on
+          ? ` [Pending for ${Math.floor((Date.now() - new Date(item.first_raised_on).getTime()) / (1000 * 60 * 60 * 24))}d]`
+          : '';
+        const note = item.note ? ` - Note: "${item.note}"` : '';
+        lines.push(` • ${title}${days}${note}`);
+      });
+    });
+
+    lines.push('\nShared via VTech Site Dependency Tracker');
+
+    navigator.clipboard.writeText(lines.join('\n'));
+    setNotice('Copied status note to clipboard!');
+    setTimeout(() => setNotice(null), 3000);
+  };
+
+  // Download client-pending PDF
+  const handleDownloadClientPendingPdf = async () => {
+    try {
+      const res = await fetch('/api/reports/client-pending.pdf', { method: 'HEAD' });
+      if (res.status === 404 || !res.ok) {
+        alert('Client-pending PDF report is coming soon! (Hermes is currently generating this report route)');
+        return;
+      }
+      window.open('/api/reports/client-pending.pdf', '_blank');
+    } catch {
+      alert('Client-pending PDF report is coming soon!');
+    }
+  };
 
   // Group filtered items by Project -> Agency
   interface GroupedProject {
@@ -646,6 +800,107 @@ export default function PendingPage() {
         )}
       </div>
 
+      {/* ───────────────────────── THREE LANES TABS (P4) ───────────────────────── */}
+      <div className="mx-auto max-w-5xl px-4 pt-3">
+        <div className="flex border-b border-border bg-surface rounded-t-xl px-2 pt-2 gap-2 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveLane('external');
+              setSelectedItemIds(new Set());
+            }}
+            className={`flex items-center gap-2 whitespace-nowrap px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+              activeLane === 'external'
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <span>External (agencies)</span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                activeLane === 'external' ? 'bg-accent/15 text-accent' : 'bg-surface-alt text-text-muted'
+              }`}
+            >
+              {laneCounts.external}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveLane('internal');
+              setSelectedItemIds(new Set());
+            }}
+            className={`flex items-center gap-2 whitespace-nowrap px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+              activeLane === 'internal'
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <span>Internal (VTech team)</span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                activeLane === 'internal' ? 'bg-accent/15 text-accent' : 'bg-surface-alt text-text-muted'
+              }`}
+            >
+              {laneCounts.internal}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveLane('client');
+              setSelectedItemIds(new Set());
+            }}
+            className={`flex items-center gap-2 whitespace-nowrap px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+              activeLane === 'client'
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <span>Waiting on client</span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                activeLane === 'client' ? 'bg-accent/15 text-accent' : 'bg-surface-alt text-text-muted'
+              }`}
+            >
+              {laneCounts.client}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* ───────────────────────── WAITING ON CLIENT BANNER ───────────────────────── */}
+      {activeLane === 'client' && (
+        <div className="mx-auto max-w-5xl px-4 pt-3">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/90 p-3.5 text-xs">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                <span>👤 Client Dependencies</span>
+              </div>
+              <p className="text-amber-800 text-[11px]">
+                Items waiting on client decisions, selections, or site readiness. Never chased with automated reminders.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={handleCopyClientStatusNote}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 shadow-xs hover:bg-amber-100 transition-colors"
+              >
+                📋 Copy status note
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadClientPendingPdf}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 shadow-xs hover:bg-amber-100 transition-colors"
+              >
+                📄 Download client-pending PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ───────────────────────── FILTERS BAR ───────────────────────── */}
       <div className="mx-auto max-w-5xl px-4 py-3">
         <div className="rounded-xl border border-border bg-surface p-3.5 shadow-xs space-y-3">
@@ -756,27 +1011,29 @@ export default function PendingPage() {
               </label>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleSelectAllFiltered}
-                className="text-xs font-semibold text-accent hover:underline"
-              >
-                Select all visible ({filteredItems.length})
-              </button>
-              {selectedItemIds.size > 0 && (
-                <>
-                  <span className="text-text-muted">·</span>
-                  <button
-                    type="button"
-                    onClick={handleClearSelection}
-                    className="text-xs font-semibold text-text-muted hover:text-text-primary"
-                  >
-                    Clear selection
-                  </button>
-                </>
-              )}
-            </div>
+            {activeLane !== 'client' && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSelectAllFiltered}
+                  className="text-xs font-semibold text-accent hover:underline"
+                >
+                  Select all visible ({filteredItems.length})
+                </button>
+                {selectedItemIds.size > 0 && (
+                  <>
+                    <span className="text-text-muted">·</span>
+                    <button
+                      type="button"
+                      onClick={handleClearSelection}
+                      className="text-xs font-semibold text-text-muted hover:text-text-primary"
+                    >
+                      Clear selection
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -834,16 +1091,18 @@ export default function PendingPage() {
                   {/* Project Header */}
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface-alt/70 px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={isProjFullySelected}
-                        ref={(el) => {
-                          if (el) el.indeterminate = isProjPartiallySelected;
-                        }}
-                        onChange={() => handleToggleProjectGroup(pGroup)}
-                        className="rounded border-border text-accent focus:ring-accent"
-                        aria-label={`Select all items in project ${pGroup.project.name}`}
-                      />
+                      {activeLane !== 'client' && (
+                        <input
+                          type="checkbox"
+                          checked={isProjFullySelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = isProjPartiallySelected;
+                          }}
+                          onChange={() => handleToggleProjectGroup(pGroup)}
+                          className="rounded border-border text-accent focus:ring-accent"
+                          aria-label={`Select all items in project ${pGroup.project.name}`}
+                        />
+                      )}
                       <div>
                         <div className="flex items-center gap-2">
                           <Link
@@ -893,16 +1152,18 @@ export default function PendingPage() {
                           {/* Agency Subheader */}
                           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-alt/40 px-3 py-2 border border-border/40">
                             <div className="flex items-center gap-2.5">
-                              <input
-                                type="checkbox"
-                                checked={isAgencyFullySelected}
-                                ref={(el) => {
-                                  if (el) el.indeterminate = isAgencyPartiallySelected;
-                                }}
-                                onChange={() => handleToggleAgencyGroup(aGroup.items)}
-                                className="rounded border-border text-accent focus:ring-accent"
-                                aria-label={`Select all items for ${aGroup.agency?.company_name ?? 'Unassigned'}`}
-                              />
+                              {activeLane !== 'client' && (
+                                <input
+                                  type="checkbox"
+                                  checked={isAgencyFullySelected}
+                                  ref={(el) => {
+                                    if (el) el.indeterminate = isAgencyPartiallySelected;
+                                  }}
+                                  onChange={() => handleToggleAgencyGroup(aGroup.items)}
+                                  className="rounded border-border text-accent focus:ring-accent"
+                                  aria-label={`Select all items for ${aGroup.agency?.company_name ?? 'Unassigned'}`}
+                                />
+                              )}
                               <div>
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs font-bold text-text-primary">
@@ -965,13 +1226,15 @@ export default function PendingPage() {
                                 >
                                   {/* Left: Checkbox + Location + Description */}
                                   <div className="flex items-start gap-3 sm:max-w-[55%]">
-                                    <input
-                                      type="checkbox"
-                                      checked={isSelected}
-                                      onChange={() => handleToggleItem(item.id)}
-                                      className="mt-0.5 rounded border-border text-accent focus:ring-accent"
-                                      aria-label={`Select dependency: ${item.project_dependencies?.text}`}
-                                    />
+                                    {activeLane !== 'client' && (
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => handleToggleItem(item.id)}
+                                        className="mt-0.5 rounded border-border text-accent focus:ring-accent"
+                                        aria-label={`Select dependency: ${formatPendingItemTitle(item)}`}
+                                      />
+                                    )}
                                     <div className="space-y-1">
                                       <div className="flex flex-wrap items-center gap-1.5">
                                         <span className="rounded bg-surface-alt px-1.5 py-0.5 text-[10px] font-bold text-text-secondary border border-border/60">
@@ -1006,9 +1269,18 @@ export default function PendingPage() {
                                         </span>
                                       </div>
 
-                                      <p className="font-semibold text-text-primary leading-snug">
-                                        {item.project_dependencies?.text}
-                                      </p>
+                                      <div className="flex items-center gap-1.5">
+                                        {item.product_steps?.sheet_colour && (
+                                          <span
+                                            className="inline-block w-2.5 h-2.5 rounded-full border border-black/10 flex-shrink-0"
+                                            style={{ backgroundColor: `#${item.product_steps.sheet_colour}` }}
+                                            title={`Colour: #${item.product_steps.sheet_colour}`}
+                                          />
+                                        )}
+                                        <p className="font-semibold text-text-primary leading-snug">
+                                          {formatPendingItemTitle(item)}
+                                        </p>
+                                      </div>
 
                                       {/* Attached Note / Photo */}
                                       {(item.note || item.photo_path) && (
@@ -1063,22 +1335,24 @@ export default function PendingPage() {
                                     </button>
 
                                     {/* WhatsApp Now */}
-                                    <button
-                                      type="button"
-                                      disabled={whatsAppRowLoadingId === item.id}
-                                      onClick={() => handleWhatsAppNow(item)}
-                                      className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors disabled:opacity-50"
-                                      title="Draft WhatsApp reminder for this item"
-                                    >
-                                      {whatsAppRowLoadingId === item.id ? (
-                                        <span className="h-3 w-3 animate-spin rounded-full border border-emerald-800 border-t-transparent" />
-                                      ) : (
-                                        <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-                                          <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.007c.101.005.232-.038.361.275.144.346.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.087-.179.182-.077.357.101.173.449.742.965 1.201.664.591 1.224.774 1.397.86.173.086.275.072.376-.044.101-.116.433-.506.549-.68.116-.173.231-.144.39-.086s1.011.477 1.184.564.289.13.332.202c.043.073.043.419-.101.824z" />
-                                        </svg>
-                                      )}
-                                      WhatsApp
-                                    </button>
+                                    {activeLane !== 'client' && (
+                                      <button
+                                        type="button"
+                                        disabled={whatsAppRowLoadingId === item.id}
+                                        onClick={() => handleWhatsAppNow(item)}
+                                        className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors disabled:opacity-50"
+                                        title="Draft WhatsApp reminder"
+                                      >
+                                        {whatsAppRowLoadingId === item.id ? (
+                                          <span className="h-3 w-3 animate-spin rounded-full border border-emerald-800 border-t-transparent" />
+                                        ) : (
+                                          <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+                                            <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.007c.101.005.232-.038.361.275.144.346.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.087-.179.182-.077.357.101.173.449.742.965 1.201.664.591 1.224.774 1.397.86.173.086.275.072.376-.044.101-.116.433-.506.549-.68.116-.173.231-.144.39-.086s1.011.477 1.184.564.289.13.332.202c.043.073.043.419-.101.824z" />
+                                          </svg>
+                                        )}
+                                        WhatsApp
+                                      </button>
+                                    )}
 
                                     {/* Call Contractor */}
                                     {primaryContact?.phone ? (
@@ -1115,7 +1389,7 @@ export default function PendingPage() {
       </div>
 
       {/* ───────────────────────── STICKY ACTION BAR ───────────────────────── */}
-      {selectedItemIds.size > 0 && (
+      {activeLane !== 'client' && selectedItemIds.size > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-surface px-4 py-3 shadow-lg">
           <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
             <div className="flex items-center gap-3">
