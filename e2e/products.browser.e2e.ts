@@ -105,7 +105,7 @@ test('✗ asks why (HansalV2 reasons) and points the step at that agency', async
 test('✓ all greens → only Installation appears in the same space; Sound testing waits for it', async () => {
   for (const l of ['Delivery pending client / VTECH', 'Readiness of cable', 'Readiness to install']) {
     await chip('Speakers', l).click();
-    await page.getByRole('radio', { name: 'Done' }).click();
+    await page.getByRole('radio', { name: 'Done', exact: true }).click();
     await page.getByRole('button', { name: 'Save as done' }).click();
     await expect.poll(async () => (await gate('Speakers')).find((x) => x.label === l)!.status, { timeout: 15_000 }).toBe('complete');
   }
@@ -115,7 +115,7 @@ test('✓ all greens → only Installation appears in the same space; Sound test
   await expect(chip('Speakers', 'Readiness of cable')).toHaveCount(0);
   await expect(chip('Speakers', 'Sound testing')).toHaveCount(0);
   await chip('Speakers', 'Installation').click();
-  await page.getByRole('radio', { name: 'Done' }).click();
+  await page.getByRole('radio', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'Save as done' }).click();
   await expect(chip('Speakers', 'Sound testing')).toBeEnabled({ timeout: 15_000 });
   // Other products are untouched: Keypad's later steps are still locked

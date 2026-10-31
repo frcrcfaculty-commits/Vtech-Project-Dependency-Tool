@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { Glyph } from '@/components/glass-icon';
+import { useEscape } from '@/lib/client/use-escape';
 
 export interface EditableProject {
   id: string;
@@ -49,6 +50,7 @@ export function EditProjectDialog({
   const [requestedBy, setRequestedBy] = useState('');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
+  useEscape(onClose, saving);
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState<ChangeRow[]>([]);
 

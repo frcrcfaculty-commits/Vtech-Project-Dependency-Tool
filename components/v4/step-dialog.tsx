@@ -10,6 +10,7 @@ import { compressImageToWebP } from '@/lib/client/image';
 import { todayIST } from '@/lib/client/date';
 import { stepColour, type GateRow } from '@/lib/client/steps';
 import { Glyph } from '@/components/glass-icon';
+import { useEscape } from '@/lib/client/use-escape';
 
 export interface AgencyOption { id: string; label: string; internal: boolean; typeName: string }
 interface Reason { step_prefix: string; reason: string; agency_type: string | null; sort: number }
@@ -45,6 +46,7 @@ export function StepDialog({
   const [agencyId, setAgencyId] = useState(row.agency_id ?? '');
   const [photo, setPhoto] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  useEscape(onClose, saving);
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<EventRow[]>([]);
 

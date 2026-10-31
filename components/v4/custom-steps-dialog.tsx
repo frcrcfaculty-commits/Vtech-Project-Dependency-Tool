@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { Glyph } from '@/components/glass-icon';
+import { useEscape } from '@/lib/client/use-escape';
 import type { AgencyOption } from './step-dialog';
 
 interface Draft { label: string; phase: 1 | 2; responsibility: 'external' | 'internal'; agencyId: string }
@@ -35,6 +36,7 @@ export function CustomStepsDialog({
 }) {
   const [steps, setSteps] = useState<Draft[]>(SUGGESTED);
   const [saving, setSaving] = useState(false);
+  useEscape(onClose, saving);
   const [error, setError] = useState<string | null>(null);
 
   const set = (i: number, patch: Partial<Draft>) => setSteps(steps.map((s, j) => (j === i ? { ...s, ...patch } : s)));
