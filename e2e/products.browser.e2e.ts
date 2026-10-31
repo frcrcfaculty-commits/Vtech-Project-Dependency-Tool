@@ -1,7 +1,6 @@
-// Product tracking (v3) in the real UI, signed in as the PM lead. Chromium against E2E_BASE_URL.
-// Picker adds 3 products to a room → Hub shows the locked steps without status buttons → complete the greens in the UI →
-// Installation (and the other phase-2 steps) become actionable. Every outcome is checked in the DATABASE (item_gate);
-// selectors are role/text only. Creates only a "TEST – e2e …" project; cleanup() deletes it.
+// Product tracking on the v4 Dashboard, signed in as the PM lead. Chromium against E2E_BASE_URL.
+// Picker adds 3 products → Dashboard shows only green ✗ checkboxes → reasons → greens ✓ → one step at a time → sort + logged edit.
+// Every outcome is checked in the DATABASE (item_gate); selectors are role/text only. Creates only a "TEST – e2e …" project.
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { admin, cleanup, env, ok, TEST_PREFIX } from './helpers';
 
@@ -24,13 +23,11 @@ const gate = async (title: string): Promise<Gate[]> => {
   return ok(await db.from('item_gate').select('item_id, label, phase, status, locked').eq('room_product_id', rp.id).order('seq'), 'gate') as Gate[];
 };
 
-/** A product card on the Hub: the outermost ancestor of its heading that holds only that one product heading. */
-const card = (title: string): Locator =>
-  page.getByRole('heading', { level: 5, name: new RegExp(`^${title}\\b`) }).locator('xpath=ancestor::div[count(.//h5)=1][last()]');
-/** A step row inside a product card: nearest ancestor of the step label holding its own actions (buttons or the lock). */
-const row = (title: string, label: string): Locator =>
-  card(title).locator('p', { hasText: new RegExp(`^#\\d+\\s*${label.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}$`) })
-    .locator('xpath=ancestor::div[.//button[contains(., "Done")] or .//span[contains(., "Locked")]][1]');
+/** A BOQ line on the v4 Dashboard matrix. */
+const line = (title: string): Locator => page.locator('li[data-line]').filter({ has: page.getByText(title, { exact: true }) }).first();
+/** A status checkbox (chip) in a line, by step label. */
+const chip = (title: string, label: string): Locator =>
+  line(title).getByRole('button', { name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}: `) });
 
 test.beforeAll(async ({ browser }) => {
   await cleanup();
@@ -75,42 +72,73 @@ test('product picker: add Keypad, Speakers and Door lock (with locations) to a r
   expect((await gate('Door lock')).length).toBe(6);
 });
 
-test('Hub: locked steps have no status buttons; open greens do', async () => {
+test('Dashboard: only the green steps show as ✗ checkboxes; later steps are hidden until the greens are done', async () => {
   await page.goto(`/hub?p=${projectId}`);
-  await expect(card('Speakers')).toBeVisible();
-  // Default view hides locked steps; switch to all steps to inspect them.
-  await page.getByRole('button', { name: /what.s actionable now/i }).click();
-  await expect(page.getByRole('button', { name: /show all steps/i })).toBeVisible();
-
+  await expect(page.getByRole('heading', { name: 'VTech Dashboard' })).toBeVisible();
+  await expect(line('Speakers')).toBeVisible();
+  for (const l of ['Delivery pending client / VTECH', 'Readiness of cable', 'Readiness to install']) {
+    await expect(chip('Speakers', l)).toBeEnabled();
+    await expect(chip('Speakers', l)).toHaveAccessibleName(/not done/);
+  }
+  await expect(chip('Speakers', 'Installation')).toHaveCount(0);
   const g = await gate('Speakers');
   expect(g.filter((x) => x.locked).map((x) => x.label)).toEqual(['Installation', 'Sound testing']);
-  for (const l of ['Installation', 'Sound testing']) {
-    await expect(row('Speakers', l)).toContainText(/Locked/);
-    await expect(row('Speakers', l).getByRole('button', { name: /done|pending|n\.a\./i })).toHaveCount(0);
-  }
-  for (const l of ['Readiness of cable', 'Readiness to install']) {
-    await expect(row('Speakers', l).getByRole('button', { name: /done/i })).toBeEnabled();
-  }
-  // Door lock's blue carpenter step is locked too
-  await expect(row('Door lock', 'Readiness by carpenter')).toContainText(/Locked/);
+  // "Show all steps" reveals them, locked
+  await page.getByLabel('Show all steps').check();
+  await expect(chip('Speakers', 'Installation')).toBeDisabled();
+  await page.getByLabel('Show all steps').uncheck();
 });
 
-test('complete the Speakers greens in the UI → Installation and Sound testing unlock together and become actionable', async () => {
-  for (const g of (await gate('Speakers')).filter((x) => x.phase === 1)) {
-    await row('Speakers', g.label).getByRole('button', { name: /done/i }).click();
-    await page.getByRole('button', { name: 'Save Status' }).click();
-    await expect.poll(async () => (await gate('Speakers')).find((x) => x.item_id === g.item_id)!.status, { timeout: 15_000 }).toBe('complete');
+test('✗ asks why (HansalV2 reasons) and points the step at that agency', async () => {
+  await chip('Speakers', 'Readiness of cable').click();
+  await page.getByRole('radio', { name: 'Not done' }).click();
+  await page.getByRole('radio', { name: /Work pending from electrician/ }).check();
+  await page.getByRole('button', { name: 'Save as not done' }).click();
+  await expect.poll(async () => (await gate('Speakers')).find((x) => x.label === 'Readiness of cable')!.status, { timeout: 15_000 }).toBe('pending');
+  const it = ok(await db.from('dependency_items').select('stuck_reason, agencies(company_name)')
+    .eq('id', (await gate('Speakers')).find((x) => x.label === 'Readiness of cable')!.item_id).single(), 'item');
+  expect(it.stuck_reason).toBe('Work pending from electrician');
+  expect((it.agencies as unknown as { company_name: string }).company_name).toBe('E2E UI Electrician');
+  await expect(chip('Speakers', 'Readiness of cable')).toHaveAccessibleName(/Work pending from electrician/);
+});
+
+test('✓ all greens → only Installation appears in the same space; Sound testing waits for it', async () => {
+  for (const l of ['Delivery pending client / VTECH', 'Readiness of cable', 'Readiness to install']) {
+    await chip('Speakers', l).click();
+    await page.getByRole('radio', { name: 'Done' }).click();
+    await page.getByRole('button', { name: 'Save as done' }).click();
+    await expect.poll(async () => (await gate('Speakers')).find((x) => x.label === l)!.status, { timeout: 15_000 }).toBe('complete');
   }
   const after = await gate('Speakers');
-  expect(after.filter((x) => x.phase === 2).map((x) => [x.label, x.locked])).toEqual([['Installation', false], ['Sound testing', false]]);
-
-  await page.reload();
-  const toggle = page.getByRole('button', { name: /what.s actionable now/i });
-  if (await toggle.isVisible()) await toggle.click();
-  await expect(row('Speakers', 'Installation')).not.toContainText(/Locked/);
-  await row('Speakers', 'Installation').getByRole('button', { name: /pending/i }).click();
-  await page.getByRole('button', { name: 'Save Status' }).click();
-  await expect.poll(async () => (await gate('Speakers')).find((x) => x.label === 'Installation')!.status, { timeout: 15_000 }).toBe('pending');
-  // Other products are untouched: Keypad's phase-2 steps are still locked
+  expect(after.filter((x) => x.phase === 2).map((x) => [x.label, x.locked])).toEqual([['Installation', false], ['Sound testing', true]]);
+  await expect(chip('Speakers', 'Installation')).toBeEnabled();
+  await expect(chip('Speakers', 'Readiness of cable')).toHaveCount(0);
+  await expect(chip('Speakers', 'Sound testing')).toHaveCount(0);
+  await chip('Speakers', 'Installation').click();
+  await page.getByRole('radio', { name: 'Done' }).click();
+  await page.getByRole('button', { name: 'Save as done' }).click();
+  await expect(chip('Speakers', 'Sound testing')).toBeEnabled({ timeout: 15_000 });
+  // Other products are untouched: Keypad's later steps are still locked
   expect((await gate('Keypad')).filter((x) => x.phase === 2).every((x) => x.locked)).toBe(true);
+});
+
+test('Sort product-wise / floor-wise; Edit project details logs why and who asked', async () => {
+  await page.getByRole('radio', { name: /Product-wise/ }).click();
+  await expect(page.getByRole('heading', { level: 3, name: /^Door lock/ })).toBeVisible();
+  await page.getByRole('radio', { name: /Floor-wise/ }).click();
+  await expect(page.getByRole('heading', { level: 3, name: /^Ground Floor/ })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Edit project details' }).click();
+  await page.getByLabel('Keypad location').fill('Bedside');
+  await page.getByRole('button', { name: /^Save 1 change$/ }).click();
+  await expect(page.getByRole('alert')).toContainText(/why the change is needed/);
+  await page.getByLabel('Requested by').fill('Client – E2E');
+  await page.getByLabel('Why is the change needed?').fill('Keypad moved after site visit');
+  await page.getByRole('button', { name: /^Save 1 change$/ }).click();
+  await expect.poll(async () => (await db.from('room_products').select('location, product_catalogue!inner(title)').eq('project_id', projectId)
+    .eq('product_catalogue.title', 'Keypad').single()).data?.location, { timeout: 15_000 }).toBe('Bedside');
+  const log = ok(await db.from('project_changes').select('requested_by, reason, changes').eq('project_id', projectId), 'log');
+  expect(log).toHaveLength(1);
+  expect(log[0]).toMatchObject({ requested_by: 'Client – E2E', reason: 'Keypad moved after site visit' });
+  expect(log[0].changes).toEqual([{ what: 'Keypad · Ground Floor · Living Room: location', from: 'Entrance', to: 'Bedside' }]);
 });
