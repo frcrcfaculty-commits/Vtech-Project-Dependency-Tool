@@ -1,0 +1,40 @@
+# H6 monitoring. Daily 08:45 IST. A failed run makes GitHub email the repo owner; nothing is sent when all is well.
+# Checks: production /login answers 200 and renders the app, one Supabase
+# read (also keeps the free Supabase project from pausing), the weekly-digest endpoint is up and refuses calls without the secret.
+name: Monitor
+on:
+  schedule:
+    - cron: '15 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    env:
+      APP: https://vtech-dependency-tracker.vercel.app
+      SUPABASE_URL: https://jqjoxlunlbmwyxowvkyf.supabase.co
+      # Public anon key (already shipped to every browser). RLS applies.
+      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impxam94bHVubGJtd3l4b3d2a3lmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMxNzExODcsImV4cCI6MjEwODc0NzE4N30.DQcua4poW5n7B-X30vcvXTKlY-gdtz_DKzPuE49DXF8
+    steps:
+      - name: Login page answers 200
+        run: |
+          code=$(curl -s -o page.html -w '%{http_code}' --retry 2 "$APP/login")
+          echo "/login: $code"
+          test "$code" = 200 || { echo "::error::/login returned $code"; exit 1; }
+          grep -q 'VTech' page.html || { echo "::error::/login did not render the app"; exit 1; }
+
+      - name: Supabase answers (and stays awake)
+        run: |
+          code=$(curl -s -o out.json -w '%{http_code}' --retry 2 "$SUPABASE_URL/rest/v1/agency_types?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          echo "supabase: $code $(head -c 200 out.json)"
+          test "$code" = 200 || { echo "::error::Supabase REST returned $code (paused or down?)"; exit 1; }
+
+      - name: Weekly digest endpoint is up and locked
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$APP/api/cron/weekly-digest")
+          echo "digest without secret: $code"
+          test "$code" = 401 || { echo "::error::digest endpoint returned $code without the cron secret (expected 401)"; exit 1; }

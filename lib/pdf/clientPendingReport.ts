@@ -5,7 +5,7 @@ import 'regenerator-runtime/runtime.js';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFPage } from 'pdf-lib';
 import { daysOpen } from '../report';
-import { draw, formatDate, sanitize, width, wrap, type Face, type PdfFonts } from './pendingReport';
+import { draw, drawLogo, formatDate, sanitize, width, wrap, type Face, type PdfFonts } from './pendingReport';
 
 export interface ClientItem {
   floorLabel: string; floorSort: number; roomName: string; roomSort: number;
@@ -60,6 +60,7 @@ export async function buildClientPendingPdf(input: ClientInput, fonts: PdfFonts)
   };
 
   newPage();
+  drawLogo(page, page.getWidth() - M, y);
   const projects = input.projects.filter((p) => p.items.length);
   const total = projects.reduce((s, p) => s + p.items.length, 0);
   draw(page, 'Waiting on client', M, y - 18, bold, 18); y -= 26;

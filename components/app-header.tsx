@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, type FormEvent } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { VTechLogo } from '@/components/vtech-logo';
 
 export function AppHeader() {
   const { profile, signOut, changePassword } = useAuth();
@@ -36,14 +37,18 @@ export function AppHeader() {
 
   return (
     <>
-      <header className="sticky top-0 z-30 border-b border-border bg-surface px-4 py-2.5">
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
+      <header className="glass-bar sticky top-0 z-30 px-4 py-2.5 lg:px-8">
+        <div className="mx-auto flex max-w-7xl items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-6">
             <Link
               href="/hub"
-              className="text-lg font-bold tracking-tight text-text-primary hover:opacity-80 transition-opacity"
+              aria-label="VTech – Site Tracker home"
+              className="flex items-center gap-2.5 hover:opacity-85 transition-opacity"
             >
-              VTech
+              <VTechLogo className="h-[22px] w-auto" />
+              <span className="hidden sm:inline border-l border-border pl-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">
+                Site Tracker
+              </span>
             </Link>
 
             {/* Navigation pills for admins (desktop / tablet) */}

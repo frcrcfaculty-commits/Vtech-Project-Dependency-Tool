@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { compressImageToWebP } from '@/lib/client/image';
+import { todayIST } from '@/lib/client/date';
+import { AppHeader } from '@/components/app-header';
 import { getEscalationLevel, isEscalated } from '@/lib/client/escalation';
 
 interface PendingItem {
@@ -533,7 +535,7 @@ export default function PendingPage() {
   // Status Sheet Handlers (Done / N.A.)
   const handleOpenStatusSheet = (item: PendingItem, targetStatus: 'complete' | 'pending' | 'na') => {
     setStatusTargetItem({ item, targetStatus });
-    setStatusDate(new Date().toISOString().slice(0, 10));
+    setStatusDate(todayIST());
     setStatusNote(item.note ?? '');
     setPhotoFile(null);
     setPhotoPreview(null);
@@ -573,7 +575,7 @@ export default function PendingPage() {
       const { error: rpcErr } = await sb.rpc('set_item_status', {
         p_item: item.id,
         p_status: targetStatus,
-        p_date: statusDate || new Date().toISOString().slice(0, 10),
+        p_date: statusDate || todayIST(),
         p_note: statusNote.trim() || null,
         p_photo: storagePath,
       });
@@ -723,6 +725,7 @@ export default function PendingPage() {
 
   return (
     <div className="min-h-screen bg-surface-alt pb-28">
+      <AppHeader />
       {/* ───────────────────────── HEADER & STATS ───────────────────────── */}
       <div className="border-b border-border bg-surface px-4 py-5 shadow-xs">
         <div className="mx-auto max-w-5xl">

@@ -6,7 +6,7 @@ import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFPage } from 'pdf-lib';
 import { levelForReminder, type EscalationPolicy } from '../escalation';
 import { daysOpen } from '../report';
-import { draw, formatDate, roomLabel, sanitize, width, wrap, type Face, type PdfFonts } from './pendingReport';
+import { draw, drawLogo, formatDate, roomLabel, sanitize, width, wrap, type Face, type PdfFonts } from './pendingReport';
 
 export interface PortfolioItem {
   floorLabel: string; floorSort: number; roomName: string; roomSort: number;
@@ -69,6 +69,7 @@ export async function buildPortfolioPdf(input: PortfolioInput, fonts: PdfFonts):
 
   // ── Cover: totals per project ──
   newPage();
+  drawLogo(page, PAGE[0] - M, y);
   const sum = summarise(input);
   const total = sum.reduce((s, x) => s + x.pending, 0);
   draw(page, 'All pending items', M, y - 18, bold, 18); y -= 26;

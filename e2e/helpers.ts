@@ -12,9 +12,24 @@ export const env = (k: string) => {
 export const BASE_URL = () => env('E2E_BASE_URL').replace(/\/$/, '');
 export const TEST_PREFIX = 'TEST – e2e';
 
-/** Service-role client. Setup/teardown ONLY (deleting TEST projects). Never used for the steps under test. */
+/** Service-role client. Setup/teardown ONLY (deleting TEST projects). Never used for the steps under test.
+ *  Without SUPABASE_SERVICE_ROLE_KEY it falls back to the PM lead's session (RLS applies; the lead sees every project).
+ *  In that mode TEST projects are not deleted (only super admins may delete projects): remove them afterwards with
+ *  `delete from projects where name like 'TEST – e2e%'`. */
 export function admin(): SupabaseClient {
-  return createClient(env('NEXT_PUBLIC_SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false } });
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (key) return createClient(env('NEXT_PUBLIC_SUPABASE_URL'), key, { auth: { persistSession: false } });
+  let token: Promise<string> | undefined;
+  const leadToken = async () => {
+    const c = createClient(env('NEXT_PUBLIC_SUPABASE_URL'), env('NEXT_PUBLIC_SUPABASE_ANON_KEY'), { auth: { persistSession: false } });
+    const { data, error } = await c.auth.signInWithPassword({ email: env('E2E_LEAD_EMAIL'), password: env('E2E_LEAD_PASSWORD') });
+    if (error || !data.session) throw new Error(`admin fallback sign in: ${error?.message}`);
+    return data.session.access_token;
+  };
+  return createClient(env('NEXT_PUBLIC_SUPABASE_URL'), env('NEXT_PUBLIC_SUPABASE_ANON_KEY'), {
+    auth: { persistSession: false },
+    accessToken: () => (token ??= leadToken()),
+  });
 }
 
 export interface Session {
