@@ -396,26 +396,26 @@ function Dashboard() {
 
             {/* filters (same as before) + sort */}
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-              <div role="radiogroup" aria-label="Sort" className="inline-flex rounded-xl border border-border bg-surface-alt p-1">
+              <div role="radiogroup" aria-label="Sort" className="inline-flex w-full rounded-xl border border-border bg-surface-alt p-1 sm:w-auto">
                 {([['room', 'Room-wise', 'rooms'], ['floor', 'Floor-wise', 'floors'], ['product', 'Product-wise', 'products']] as const).map(([k, label, icon]) => (
                   <button key={k} type="button" role="radio" aria-checked={sortBy === k} onClick={() => setSortBy(k)}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition ${sortBy === k ? 'bg-surface text-accent shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}>
+                    className={`inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 font-medium transition sm:flex-none sm:px-3 ${sortBy === k ? 'bg-surface text-accent shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}>
                     <Glyph name={icon} /> {label}
                   </button>
                 ))}
               </div>
-              <select aria-label="Status filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="rounded-xl border border-border px-3 py-2">
+              <select aria-label="Status filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="w-full rounded-xl border border-border px-3 py-2 sm:w-auto">
                 <option value="all">All lines ({lines.length})</option>
                 <option value="open">Open lines</option>
                 <option value="stuck">Not done (with a reason)</option>
                 <option value="escalated">Escalated (L2+)</option>
                 <option value="done">Fully done</option>
               </select>
-              <select aria-label="Agency filter" value={agencyFilter} onChange={(e) => setAgencyFilter(e.target.value)} className="max-w-[16rem] rounded-xl border border-border px-3 py-2">
+              <select aria-label="Agency filter" value={agencyFilter} onChange={(e) => setAgencyFilter(e.target.value)} className="w-full rounded-xl border border-border px-3 py-2 sm:w-auto sm:max-w-[16rem]">
                 <option value="all">All agencies</option>
                 {agencyOptions.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
               </select>
-              <input aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search product, room, model…" className="min-w-0 flex-1 rounded-xl border border-border px-3 py-2 sm:max-w-xs" />
+              <input aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search product, room, model…" className="w-full min-w-0 rounded-xl border border-border px-3 py-2 sm:w-auto sm:flex-1 sm:max-w-xs" />
               <label className="inline-flex items-center gap-2 text-text-secondary">
                 <input type="checkbox" checked={showAllSteps} onChange={(e) => setShowAllSteps(e.target.checked)} /> Show all steps
               </label>

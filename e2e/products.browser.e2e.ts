@@ -24,7 +24,8 @@ const gate = async (title: string): Promise<Gate[]> => {
 };
 
 /** A BOQ line on the v4 Dashboard matrix. */
-const line = (title: string): Locator => page.locator('li[data-line]').filter({ has: page.getByText(title, { exact: true }) }).first();
+const line = (title: string): Locator =>
+  page.locator('li[data-line]').filter({ has: page.locator('p', { hasText: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(not in list)?$`) }) }).first();
 /** A status checkbox (chip) in a line, by step label. */
 const chip = (title: string, label: string): Locator =>
   line(title).getByRole('button', { name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}: `) });
