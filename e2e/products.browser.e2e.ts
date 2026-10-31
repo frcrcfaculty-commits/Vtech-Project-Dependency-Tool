@@ -137,8 +137,8 @@ test('Sort product-wise / floor-wise; Edit project details logs why and who aske
   await page.getByRole('button', { name: /^Save 1 change$/ }).click();
   await expect.poll(async () => (await db.from('room_products').select('location, product_catalogue!inner(title)').eq('project_id', projectId)
     .eq('product_catalogue.title', 'Keypad').single()).data?.location, { timeout: 15_000 }).toBe('Bedside');
+  await expect.poll(async () => (await db.from('project_changes').select('id').eq('project_id', projectId)).data?.length, { timeout: 15_000 }).toBe(1);
   const log = ok(await db.from('project_changes').select('requested_by, reason, changes').eq('project_id', projectId), 'log');
-  expect(log).toHaveLength(1);
   expect(log[0]).toMatchObject({ requested_by: 'Client – E2E', reason: 'Keypad moved after site visit' });
   expect(log[0].changes).toEqual([{ what: 'Keypad · Ground Floor · Living Room: location', from: 'Entrance', to: 'Bedside' }]);
 });

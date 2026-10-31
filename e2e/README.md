@@ -12,7 +12,9 @@ PM lead assigns them, the project appears. Roles: PM cannot create users; PM lea
 
 The UI does wizard and visit steps as direct Supabase calls under RLS (docs/SPEC.md §5). The test does the same with the
 user's own session, and drives the server steps through the app's HTTP API exactly as the UI will.
-When the UI ships, add browser-level specs alongside (`*.e2e.ts`); the helpers already provide signed-in sessions.
+Browser specs: `products.browser.e2e.ts` drives the v4 Dashboard. The v1 site-visit (S5/S6) and v2 office browser specs were removed
+with those screens (archived on branch `archive/v3`). Without the service-role key, `admin()` uses the PM lead session; delete
+`TEST – e2e…` projects afterwards with SQL.
 
 ## Run
 Needs in `.env.local` (never committed): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
