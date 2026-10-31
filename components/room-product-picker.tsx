@@ -9,7 +9,6 @@ export interface RoomProductPickerProps {
   onRoomChange?: (newRoomId: string) => void;
   onFinish?: () => void;
   isWizard?: boolean;
-  onSwitchToMasterList?: () => void;
 }
 
 interface Floor {
@@ -74,7 +73,6 @@ export function RoomProductPicker({
   onRoomChange,
   onFinish,
   isWizard = false,
-  onSwitchToMasterList,
 }: RoomProductPickerProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -439,15 +437,6 @@ export function RoomProductPicker({
         </div>
 
         <div className="flex items-center gap-2">
-          {onSwitchToMasterList && (
-            <button
-              type="button"
-              onClick={onSwitchToMasterList}
-              className="text-xs font-medium text-text-secondary hover:text-text-primary underline px-2 py-1"
-            >
-              Use master dependency list (classic)
-            </button>
-          )}
           {!isProjectWide && rooms.length > 1 && (
             <button
               type="button"

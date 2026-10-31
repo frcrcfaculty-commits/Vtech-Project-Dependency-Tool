@@ -92,17 +92,28 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
   } else {
     if (er.effectiveLevel < level) warnings.push(`No L${level} email contact for ${agency.companyName}; sent to L${er.effectiveLevel}.`);
     const cc: Person[] = er.cc.map((c) => ({ name: c.name, email: c.email! }));
+    const greeting = internal
+      ? `${er.to.map((c) => c.name).join(', ')}`
+      : `${er.to.map((c) => c.name).join(', ')} and the ${agency.companyName} team`;
+    const closingAsk = internal
+      ? 'Please take them up and update me once they are done.'
+      : 'We would be grateful if you could take these up at your earliest convenience, so that our team can complete the automation work on schedule.';
+    const thanks = internal
+      ? 'Thank you.'
+      : 'If any of these are already done, or if you need anything from us, please reply to this email and we will update our records. Thank you for your help.';
     if (shouldCcManagement(level, policy)) {
       for (const m of input.management) if (!cc.some((c) => c.email === m.email)) cc.push({ name: m.name, email: m.email });
     }
     const textLines = [
-      `Dear ${er.to.map((c) => c.name).join(', ')},`,
+      `Dear ${greeting},`,
+      '',
+      internal ? `Hope you are doing well.` : `Greetings from VTech Technologies, and thank you for your continued support on ${project.name}.`,
       '',
       (followUp
-        ? `As of ${formatDate(visitDate)}, the following ${agency.typeName.toLowerCase()} items at ${project.name}${project.clientName ? ` (${project.clientName})` : ''} are still pending. `
+        ? `As of ${formatDate(visitDate)}, the following ${agency.typeName.toLowerCase()} items at ${project.name}${project.clientName ? ` (${project.clientName})` : ''} are still pending from your side. `
         : `At our site visit on ${formatDate(visitDate)} at ${project.name}${project.clientName ? ` (${project.clientName})` : ''}, ` +
-          `the following ${agency.typeName.toLowerCase()} items were found pending. `) +
-        'Please complete them at the earliest.',
+          `the following ${agency.typeName.toLowerCase()} items were found pending from your side. `) +
+        closingAsk,
       '',
       ...withLevels.map((i, n) =>
         `${n + 1}. ${location(i)}: ${i.text} — first raised ${formatDate(i.firstRaisedOn)}, reminder #${i.reminderNo}` +
@@ -110,7 +121,9 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
       '',
       terms,
       '',
-      `Regards,`,
+      thanks,
+      '',
+      `Warm regards,`,
       `${pm.name}`,
       `VTech Technologies${pm.phone ? ` | ${pm.phone}` : ''}`,
     ];
@@ -148,11 +161,12 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
         </table>
       </td></tr>` : ''}
       <tr><td style="padding:0 16px 12px 16px;${F};font-size:14px;line-height:20px;color:#1a1a1a">
-        <p style="margin:0 0 10px 0">Dear ${esc(er.to.map((c) => c.name).join(', '))},</p>
+        <p style="margin:0 0 10px 0">Dear ${esc(greeting)},</p>
+        <p style="margin:0 0 10px 0">${internal ? 'Hope you are doing well.' : `Greetings from VTech Technologies, and thank you for your continued support on <b>${esc(project.name)}</b>.`}</p>
         <p style="margin:0">${followUp
-          ? `As of <b>${formatDate(visitDate)}</b>, the following ${esc(agency.typeName.toLowerCase())} items at <b>${esc(project.name)}</b>${project.clientName ? ` (${esc(project.clientName)})` : ''} are still pending.`
+          ? `As of <b>${formatDate(visitDate)}</b>, the following ${esc(agency.typeName.toLowerCase())} items at <b>${esc(project.name)}</b>${project.clientName ? ` (${esc(project.clientName)})` : ''} are still pending from your side.`
           : `At our site visit on <b>${formatDate(visitDate)}</b> at <b>${esc(project.name)}</b>${project.clientName ? ` (${esc(project.clientName)})` : ''},
-          the following ${esc(agency.typeName.toLowerCase())} items were found pending.`} Please complete them at the earliest.</p>
+          the following ${esc(agency.typeName.toLowerCase())} items were found pending from your side.`} ${esc(closingAsk)}</p>
       </td></tr>
       <tr><td style="padding:0 10px 8px 10px">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
@@ -164,7 +178,8 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
         </table>
       </td></tr>
       <tr><td style="padding:12px 16px 0 16px;${F};font-size:12px;line-height:17px;color:#344054;white-space:pre-line">${esc(terms)}</td></tr>
-      <tr><td style="padding:16px 16px 22px 16px;${F};font-size:14px;line-height:20px;color:#1a1a1a">Regards,<br><b>${esc(pm.name)}</b><br>VTech Technologies${pm.phone ? ` | ${esc(pm.phone)}` : ''}</td></tr>
+      <tr><td style="padding:14px 16px 0 16px;${F};font-size:14px;line-height:20px;color:#1a1a1a">${esc(thanks)}</td></tr>
+      <tr><td style="padding:16px 16px 22px 16px;${F};font-size:14px;line-height:20px;color:#1a1a1a">Warm regards,<br><b>${esc(pm.name)}</b><br>VTech Technologies${pm.phone ? ` | ${esc(pm.phone)}` : ''}</td></tr>
     </table>
   </td></tr>
 </table>`;
@@ -184,11 +199,12 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
     warnings.push(`No WhatsApp number for ${agency.companyName}; WhatsApp skipped.`);
   } else {
     const head =
-      `*VTech – ${project.name}*${level >= 2 ? `  ⚠️ Escalation L${level}` : ''}\n` +
+      `Hello ${wr.to.map((c) => c.name.split(' ')[0]).join(', ')}, greetings from VTech 🙏\n` +
+      `*${project.name}*${level >= 2 ? `  ⚠️ Escalation L${level}` : ''}\n` +
       `${followUp ? 'Status as of' : 'Site visit'} ${formatDate(visitDate)}: ${withLevels.length} pending ${agency.typeName.toLowerCase()} item${withLevels.length === 1 ? '' : 's'} (${agency.companyName}).\n\n`;
     const foot = internal
       ? `\n\nPlease close these at the earliest and update ${pm.name}.\n– ${pm.name}, VTech`
-      : `\n\nPlease complete at the earliest. Once addressed, VTech needs 2–4 days to finish automation work. Kindly protect installed automation devices.\n– ${pm.name}, VTech`;
+      : `\n\nWe would be grateful if you could take these up at your earliest convenience. Once they are done, VTech needs 2–4 days to finish the automation work. If anything is already done, just reply here. Thank you!\n– ${pm.name}, VTech`;
     let body = '';
     let shown = 0;
     for (const [n, i] of withLevels.entries()) {

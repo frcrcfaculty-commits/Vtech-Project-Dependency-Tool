@@ -142,3 +142,20 @@ describe('internal team reminders', () => {
     expect(r.email!.text).toContain('General terms and attention');
   });
 });
+
+describe('v4 polite wording', () => {
+  it('greets the agency and its team, thanks them, asks kindly; internal stays short', () => {
+    const r = buildAgencyReport({ ...base([item({ note: 'Work pending from electrician' })]), occasion: 'follow_up' });
+    expect(r.email!.text).toContain('Dear Ramesh and the Sparks Electricals team,');
+    expect(r.email!.text).toContain('Greetings from VTech Technologies');
+    expect(r.email!.text).toContain('We would be grateful if you could take these up');
+    expect(r.email!.text).toContain('Warm regards,');
+    expect(r.email!.text).toContain('Work pending from electrician');
+    expect(r.email!.text).not.toContain('at the earliest');
+    expect(r.email!.html).toContain('the Sparks Electricals team');
+    expect(r.whatsapp!.text.startsWith('Hello Ramesh, greetings from VTech')).toBe(true);
+    const i = buildAgencyReport({ ...base([item()]), agency: { ...base([]).agency, internal: true } });
+    expect(i.email!.text).toContain('Dear Ramesh,');
+    expect(i.email!.text).not.toContain('Greetings from VTech');
+  });
+});

@@ -122,9 +122,9 @@ test('reminders with itemIds → exactly one email + one WhatsApp draft with onl
   const email = list.dispatches.find((d) => d.channel === 'email')!;
   const wa = list.dispatches.find((d) => d.channel === 'whatsapp')!;
   expect(email.recipients.to.map((p) => p.name)).toEqual(['Office Elec L1']);
-  expect(email.body_text).toMatch(/^Dear Office Elec L1,\n\nAs of .+ are still pending\./m);
+  expect(email.body_text).toMatch(/^Dear Office Elec L1 and the E2E Office Sparks team,\n\nGreetings from VTech Technologies[^\n]*\n\nAs of .+ are still pending from your side\./m);
   expect(email.body_text).not.toMatch(/site visit/i);
-  expect(email.body_html).toContain('are still pending.');
+  expect(email.body_html).toContain('are still pending from your side.');
   expect(email.body_text).toContain('Fittings not delivered');
   expect(wa.body_text).toMatch(/Status as of /);
   expect(email.body_text).not.toContain('Ground Floor – Living Room: ' + 'E2E custom'); // done item never included

@@ -5,6 +5,7 @@ import { useAuth } from '@/components/auth-provider';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { VTechLogo } from '@/components/vtech-logo';
+import { NotificationsBell } from '@/components/v4/notifications-bell';
 
 export function AppHeader() {
   const { profile, signOut, changePassword } = useAuth();
@@ -62,7 +63,7 @@ export function AppHeader() {
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  Hub
+                  Dashboard
                 </Link>
                 <Link
                   href="/pending"
@@ -93,7 +94,7 @@ export function AppHeader() {
                         : 'text-text-secondary hover:text-text-primary'
                     }`}
                   >
-                    Dashboard
+                    Reports
                   </Link>
                 )}
                 <Link
@@ -128,6 +129,8 @@ export function AppHeader() {
                 </svg>
               </button>
             )}
+
+            <NotificationsBell />
 
             <div className="relative" ref={menuRef}>
               <button
@@ -168,7 +171,7 @@ export function AppHeader() {
                             : 'text-text-primary hover:bg-surface-alt'
                         }`}
                       >
-                        Hub
+                        Dashboard
                       </Link>
                       <Link
                         href="/pending"
@@ -202,7 +205,7 @@ export function AppHeader() {
                               : 'text-text-primary hover:bg-surface-alt'
                           }`}
                         >
-                          Dashboard
+                          Reports
                         </Link>
                       )}
                       <Link
@@ -256,7 +259,7 @@ export function AppHeader() {
                   : 'text-text-secondary hover:bg-surface-alt hover:text-text-primary'
               }`}
             >
-              Hub
+              Dashboard
             </Link>
             <Link
               href="/pending"
@@ -290,7 +293,7 @@ export function AppHeader() {
                     : 'text-text-secondary hover:bg-surface-alt hover:text-text-primary'
                 }`}
               >
-                Dashboard
+                Reports
               </Link>
             )}
             <Link

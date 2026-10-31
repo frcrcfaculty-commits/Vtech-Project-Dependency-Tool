@@ -171,3 +171,31 @@ Locked steps can't be set Pending/Done (`set_item_status` raises `locked: …`);
 **Defaults to confirm with VTech:** "Delivery pending client / VTECH" defaults to the Client agency (so it is reported, not chased; the PM
 reassigns to VTech Installers when VTech owes the delivery); blue partial/complete lighting installation → Electrician; Fabric installation's
 lighter blue treated as blue; Wi-Fi locations extended to Ceiling/Room/Hall/Entrance/External.
+
+## 12. v4 — VTech Project Dependency Tracker v4 (Hansal, 2026-11-01). Phase 1: the Dashboard
+Everything before v4 is archived on branches `archive/v3` and `archive/all-workflows-2026-10-31`. v1 site visits, the
+78-item master list and the classic matrix are removed from the app (backend kept for now).
+
+**Navigation (5 tabs):** Dashboard (was Hub) · Pending · Projects · Reports (super admins; was Dashboard) · Admin.
+Top right: notifications bell, profile. Floating **+ Add dependency** on every page.
+
+**Dashboard (`/hub`).** Title "VTech Dashboard"; active projects as glass tiles; "Show closed & finished" top right.
+The selected project opens below: Send reminders · Edit project details · Close/Reopen · Delete (Vipul/Hansal only, §2).
+- **Edit project details** logs every change in `project_changes` (what, from → to, why, requested by, who, when). Append-only.
+- **Matrix**, sortable room-wise / floor-wise / product-wise: Product (brand · make · model) · Location · Agency involved ·
+  Quantity · Status. Filters: status, agency, search, show all steps.
+- **Status** = the line's dependencies as two-state checkboxes in the sheet colours: ✓ done, ✗ not done. ✗ opens a popup:
+  why (tab "HansalV2" reasons where the sheet has them, else free text), date, waiting-on agency, note, photo, history.
+  A HansalV2 reason names whose work it is; the step is re-pointed at that agency if the project has one.
+- **Gate (migration 0009, view `item_gate`):** all green steps of a line open together; after the last green, the other steps
+  open **one at a time in sheet order**, in the same space. **iPhone programming** opens at ≥ 50 % of the BOQ quantity in
+  installation; **Client Side** at ≥ 80 % of programming steps done (view `project_progress`).
+- **Notifications:** a BOQ location that is not one of the product's usual locations (sheet column B; "Other" accepts any) →
+  PM confirms or changes it; a BOQ product that is not in the sheet → PM adds its dependencies by hand (`add_custom_step`).
+  Nothing is blocked (view `location_checks`).
+- **Reminders:** unchanged route (`POST /api/projects/{id}/reminders` → review & send, email + WhatsApp). Wording is now a
+  polite greeting to the agency and its team, a kind ask, thanks; the stuck reason is listed with each item.
+
+**Still to build (next phases):** Add New Project from a BOQ import (with the sales app hand-off), consolidated BOQ sheet with
+PM validation, agencies step (External / VTech Internal; Client, Architect, PMC, Electrical, Civil, Carpentry, Wall paint
+contractors; 3 contacts each + more), agency ↔ product association (also available while sending reminders).
