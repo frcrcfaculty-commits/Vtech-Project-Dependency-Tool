@@ -230,7 +230,7 @@ export function AddDependencyFab() {
             {error && <div role="alert" className="mt-3 rounded-lg bg-danger-light px-3 py-2 text-sm text-danger">{error}</div>}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setOpen(false)} disabled={saving} className="rounded-lg border border-border px-4 py-2.5 text-sm">Cancel</button>
-              <button type="button" onClick={tab === 'product' ? addProduct : addStep} disabled={saving || !projectId} className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+              <button type="button" onClick={tab === 'product' ? addProduct : addStep} disabled={saving || !projectId || !roomId || (tab === 'step' && !lineId)} className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
                 {saving ? 'Saving…' : tab === 'product' ? 'Add product' : 'Add dependency'}
               </button>
             </div>
