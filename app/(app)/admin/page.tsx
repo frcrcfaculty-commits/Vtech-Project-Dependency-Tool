@@ -33,25 +33,6 @@ interface AgencyType {
   name: string;
 }
 
-interface MasterDep {
-  id: string;
-  agency_type_id: string;
-  seq: number;
-  text: string;
-  active: boolean;
-  origin: string;
-}
-
-interface CustomDep {
-  id: string;
-  project_id: string;
-  agency_type_id: string;
-  text: string;
-  master_dependency_id: string | null;
-  projects?: { name: string };
-  agency_types?: { name: string };
-}
-
 interface ProductCatalogueRow {
   id: string;
   title: string;
@@ -79,8 +60,7 @@ export default function AdminPage() {
   const { profile, loading: authLoading } = useAuth();
   const router = useRouter();
 
-  // Tabs: 'users' | 'assignments' | 'master'
-  const [activeTab, setActiveTab] = useState<'users' | 'assignments' | 'catalogue' | 'master'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'assignments' | 'catalogue'>('users');
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,11 +87,6 @@ export default function AdminPage() {
 
   // Master List data
   const [agencyTypes, setAgencyTypes] = useState<AgencyType[]>([]);
-  const [masterDeps, setMasterDeps] = useState<MasterDep[]>([]);
-  const [customDeps, setCustomDeps] = useState<CustomDep[]>([]);
-  const [showAddMasterModal, setShowAddMasterModal] = useState(false);
-  const [newMasterTypeId, setNewMasterTypeId] = useState('');
-  const [newMasterText, setNewMasterText] = useState('');
   const [promotingId, setPromotingId] = useState<string | null>(null);
 
   // Product Catalogue state (v3 P5)
@@ -154,8 +129,6 @@ export default function AdminPage() {
         { data: pData, error: pErr },
         { data: pmData, error: pmErr },
         { data: atData },
-        { data: mdData, error: mdErr },
-        { data: cdData, error: cdErr },
         { data: pcData, error: pcErr },
         { data: psData, error: psErr },
       ] = await Promise.all([
@@ -163,8 +136,6 @@ export default function AdminPage() {
         sb.from('projects').select('id, name, client_name').neq('status', 'closed').order('name'),
         sb.from('project_members').select('*'),
         sb.from('agency_types').select('*').order('sort'),
-        sb.from('master_dependencies').select('*').order('seq'),
-        sb.from('project_dependencies').select('id, project_id, agency_type_id, text, master_dependency_id, projects(name), agency_types(name)').is('master_dependency_id', null),
         sb.from('product_catalogue').select('*').order('sort').order('title'),
         sb.from('product_steps').select('id, product_id, seq, label, phase, responsibility, gate, default_agency_type_id, sheet_colour, agency_types(id, name)').order('seq'),
       ]);
@@ -172,8 +143,6 @@ export default function AdminPage() {
       if (uErr) throw uErr;
       if (pErr) throw pErr;
       if (pmErr) throw pmErr;
-      if (mdErr) throw mdErr;
-      if (cdErr) throw cdErr;
       if (pcErr) throw pcErr;
       if (psErr) throw psErr;
 
@@ -181,8 +150,6 @@ export default function AdminPage() {
       setProjects(pData as ProjectRow[]);
       setProjectMembers(pmData as ProjectMemberRow[]);
       setAgencyTypes(atData ?? []);
-      setMasterDeps(mdData as MasterDep[]);
-      setCustomDeps((cdData as unknown as CustomDep[]) ?? []);
       setCatalogueProducts((pcData as ProductCatalogueRow[]) ?? []);
       setCatalogueSteps((psData as unknown as ProductStepRow[]) ?? []);
 
@@ -297,66 +264,6 @@ export default function AdminPage() {
       await loadAll();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to unassign user');
-    }
-  }
-
-  // Add Master Dependency
-  async function handleAddMasterDep(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newMasterTypeId || !newMasterText.trim()) return;
-    try {
-      const sb = supabaseBrowser();
-      const typeDeps = masterDeps.filter((d) => d.agency_type_id === newMasterTypeId);
-      const nextSeq = typeDeps.length + 1;
-
-      const { error: err } = await sb.from('master_dependencies').insert({
-        agency_type_id: newMasterTypeId,
-        seq: nextSeq,
-        text: newMasterText.trim(),
-        origin: 'master',
-        active: true,
-      });
-      if (err) throw err;
-
-      setShowAddMasterModal(false);
-      setNewMasterText('');
-      await loadAll();
-      showSuccessNotice('Master dependency added');
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to add master dependency');
-    }
-  }
-
-  // Toggle Master Dependency active
-  async function handleToggleMasterActive(dep: MasterDep) {
-    try {
-      const sb = supabaseBrowser();
-      const { error: err } = await sb
-        .from('master_dependencies')
-        .update({ active: !dep.active })
-        .eq('id', dep.id);
-      if (err) throw err;
-      await loadAll();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to update master item');
-    }
-  }
-
-  // Promote custom project dependency to master list
-  async function handlePromoteCustomDep(depId: string) {
-    setPromotingId(depId);
-    try {
-      const sb = supabaseBrowser();
-      const { error: err } = await sb.rpc('promote_dependency', {
-        p_project_dependency: depId,
-      });
-      if (err) throw err;
-      await loadAll();
-      showSuccessNotice('Dependency successfully promoted to company Master List!');
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to promote dependency');
-    } finally {
-      setPromotingId(null);
     }
   }
 
@@ -871,16 +778,8 @@ export default function AdminPage() {
                 Administration Console
               </h1>
               <p className="text-xs text-text-secondary mt-0.5">
-                Manage VTech staff accounts, project assignments, and master dependency catalogue.
+                Manage VTech staff accounts, project assignments, and the product catalogue.
               </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Link
-                href="/projects"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-secondary hover:bg-surface-alt hover:text-text-primary transition-colors"
-              >
-                Site visit mode (classic) →
-              </Link>
             </div>
           </div>
         </div>
@@ -891,7 +790,6 @@ export default function AdminPage() {
             { id: 'users', label: `Staff Accounts (${users.length})` },
             { id: 'assignments', label: 'Project Assignment' },
             { id: 'catalogue', label: `Product Catalogue (${catalogueProducts.length})` },
-            { id: 'master', label: `Legacy Master List (${masterDeps.length})` },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1097,108 +995,6 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* ───────────────────────── TAB 3: MASTER LIST ───────────────────────── */}
-        {activeTab === 'master' && (
-          <div className="space-y-6">
-            {/* Custom Project Items pending Promotion */}
-            <div className="rounded-2xl border border-border bg-surface p-5 shadow-xs">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-bold text-text-primary">
-                  Site-Created Custom Items ({customDeps.length})
-                </h2>
-                <span className="text-xs text-text-muted">
-                  Custom items added by PMs on site that can be promoted into the standard catalogue
-                </span>
-              </div>
-
-              {customDeps.length === 0 ? (
-                <p className="text-xs text-text-muted italic pt-2">
-                  No site-specific custom dependencies currently awaiting promotion.
-                </p>
-              ) : (
-                <div className="divide-y divide-border/60">
-                  {customDeps.map((cd) => (
-                    <div key={cd.id} className="flex items-center justify-between py-2.5 text-xs">
-                      <div className="min-w-0 flex-1 pr-4">
-                        <p className="font-semibold text-text-primary">{cd.text}</p>
-                        <p className="text-[11px] text-text-secondary">
-                          Project: {cd.projects?.name} • Trade: {cd.agency_types?.name}
-                        </p>
-                      </div>
-
-                      <button
-                        type="button"
-                        disabled={promotingId === cd.id}
-                        onClick={() => handlePromoteCustomDep(cd.id)}
-                        className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors shrink-0"
-                      >
-                        {promotingId === cd.id ? 'Promoting…' : 'Promote to Master'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Standard Master Dependencies */}
-            <div className="rounded-2xl border border-border bg-surface p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-bold text-text-primary">
-                    Master Dependency Catalogue ({masterDeps.length} Items)
-                  </h2>
-                  <p className="text-xs text-text-secondary">
-                    VTech standard checklist items used across all installation projects.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowAddMasterModal(true)}
-                  className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors"
-                >
-                  + Add Master Item
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                {agencyTypes.map((type) => {
-                  const typeDeps = masterDeps.filter((d) => d.agency_type_id === type.id);
-                  if (typeDeps.length === 0) return null;
-
-                  return (
-                    <div key={type.id} className="border-t border-border pt-3">
-                      <h3 className="text-xs font-bold text-text-primary mb-2">
-                        {type.name} ({typeDeps.length})
-                      </h3>
-                      <div className="divide-y divide-border/50">
-                        {typeDeps.map((dep) => (
-                          <div key={dep.id} className="flex items-center justify-between py-1.5 text-xs">
-                            <span className={`flex-1 pr-4 ${!dep.active ? 'line-through text-text-muted' : 'text-text-primary'}`}>
-                              {dep.text}
-                              {dep.origin === 'promoted' && (
-                                <span className="ml-2 rounded-sm bg-accent/10 text-accent px-1.5 py-0.2 text-[10px] font-bold">
-                                  Promoted
-                                </span>
-                              )}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleMasterActive(dep)}
-                              className="text-[11px] text-text-secondary hover:underline"
-                            >
-                              {dep.active ? 'Deactivate' : 'Activate'}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
 
 
         {/* ───────────────────────── TAB 4: PRODUCT CATALOGUE (v3 P5) ───────────────────────── */}
@@ -1586,60 +1382,6 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* ── Modal: Add Master Item ── */}
-        {showAddMasterModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-            <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-xl">
-              <h3 className="text-base font-bold text-text-primary mb-2">Add Master Dependency</h3>
-              <form onSubmit={handleAddMasterDep} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-text-secondary mb-1">Contractor Trade</label>
-                  <select
-                    required
-                    value={newMasterTypeId}
-                    onChange={(e) => setNewMasterTypeId(e.target.value)}
-                    className="w-full rounded-lg border border-border px-3 py-2 text-xs focus:border-accent"
-                  >
-                    <option value="">Select trade…</option>
-                    {agencyTypes.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-secondary mb-1">Standard Checklist Text</label>
-                  <textarea
-                    required
-                    rows={3}
-                    placeholder="e.g. Ensure all switchboard back boxes are grounded and levelled"
-                    value={newMasterText}
-                    onChange={(e) => setNewMasterText(e.target.value)}
-                    className="w-full rounded-lg border border-border px-3 py-2 text-xs focus:border-accent"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddMasterModal(false)}
-                    className="rounded-lg border border-border px-3.5 py-1.5 text-xs text-text-secondary"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-accent px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-accent-hover"
-                  >
-                    Add to Master
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

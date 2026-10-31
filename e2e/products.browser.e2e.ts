@@ -131,7 +131,7 @@ test('Sort product-wise / floor-wise; Edit project details logs why and who aske
   await page.getByRole('button', { name: 'Edit project details' }).click();
   await page.getByLabel('Keypad location').fill('Bedside');
   await page.getByRole('button', { name: /^Save 1 change$/ }).click();
-  await expect(page.getByRole('alert')).toContainText(/why the change is needed/);
+  await expect(page.getByRole('alert').filter({ hasText: /why the change is needed/ })).toBeVisible();
   await page.getByLabel('Requested by').fill('Client – E2E');
   await page.getByLabel('Why is the change needed?').fill('Keypad moved after site visit');
   await page.getByRole('button', { name: /^Save 1 change$/ }).click();
@@ -141,4 +141,26 @@ test('Sort product-wise / floor-wise; Edit project details logs why and who aske
   expect(log).toHaveLength(1);
   expect(log[0]).toMatchObject({ requested_by: 'Client – E2E', reason: 'Keypad moved after site visit' });
   expect(log[0].changes).toEqual([{ what: 'Keypad · Ground Floor · Living Room: location', from: 'Entrance', to: 'Bedside' }]);
+});
+
+test('Floating "+ Add": a BOQ product not in the list → bell + "Add dependencies"; a dependency added to a product shows as ✗', async () => {
+  await page.goto(`/hub?p=${projectId}`);
+  await page.getByRole('button', { name: 'Add dependency', exact: true }).first().click();
+  await page.getByLabel('Product (as in the BOQ)').fill('Motorised TV lift');
+  await page.getByLabel('Location', { exact: true }).fill('Wall');
+  await page.getByRole('button', { name: 'Add product' }).click();
+  await expect.poll(async () => (await db.from('room_products').select('product_id, boq_title').eq('project_id', projectId).eq('boq_title', 'Motorised TV lift')).data?.length,
+    { timeout: 15_000 }).toBe(1);
+  await expect(page.getByRole('button', { name: /^Notifications \(\d+\)/ })).toBeVisible();
+  await line('Motorised TV lift').getByRole('button', { name: /Add dependencies/ }).click();
+  await page.getByRole('button', { name: 'Save dependencies' }).click();
+  await expect(chip('Motorised TV lift', 'Readiness of cable')).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole('button', { name: 'Add dependency', exact: true }).first().click();
+  await page.getByRole('tab', { name: 'Dependency to a product' }).click();
+  await page.getByLabel('Product in this room').selectOption({ label: 'Keypad · Bedside' });
+  await page.getByLabel('Dependency', { exact: true }).fill('False ceiling opening for keypad');
+  await page.getByLabel('Why is it not done?').fill('Work pending from electrician');
+  await page.getByRole('button', { name: 'Add dependency', exact: true }).last().click();
+  await expect(chip('Keypad', 'False ceiling opening for keypad')).toHaveAccessibleName(/Work pending from electrician/, { timeout: 15_000 });
 });

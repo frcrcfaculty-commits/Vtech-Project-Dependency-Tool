@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
-import { RoomDependencyPicker } from '@/components/room-dependency-picker';
 import { RoomProductPicker } from '@/components/room-product-picker';
 import Link from 'next/link';
 
@@ -50,22 +49,6 @@ interface Agency {
   agency_contacts: AgencyContact[];
 }
 
-interface MasterDep {
-  id: string;
-  agency_type_id: string;
-  seq: number;
-  text: string;
-}
-
-interface ProjectDep {
-  id: string;
-  project_id: string;
-  master_dependency_id: string | null;
-  agency_type_id: string;
-  text: string;
-  seq: number;
-}
-
 interface ProjectData {
   id: string;
   name: string;
@@ -86,7 +69,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
   // Step state: 1: Basics, 2: Floors & Rooms, 3: Agencies, 4: Dependencies, 5: Apply to Rooms, 6: Escalation & Terms
   const initialStep = Math.max(1, Math.min(6, parseInt(searchParams.get('step') ?? '2', 10)));
   const [currentStep, setCurrentStep] = useState(initialStep);
-  const [isClassic, setIsClassic] = useState(searchParams.get('mode') === 'classic');
   const [wizardRoomId, setWizardRoomId] = useState<string>('');
 
   const [loading, setLoading] = useState(true);
@@ -100,10 +82,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
   const [rooms, setRooms] = useState<Room[]>([]);
   const [agencyTypes, setAgencyTypes] = useState<AgencyType[]>([]);
   const [agencies, setAgencies] = useState<Agency[]>([]);
-  const [masterDeps, setMasterDeps] = useState<MasterDep[]>([]);
-  const [projectDeps, setProjectDeps] = useState<ProjectDep[]>([]);
   const [roomPresets, setRoomPresets] = useState<string[]>([]);
-  const [existingItems, setExistingItems] = useState<{ room_id: string; project_dependency_id: string }[]>([]);
 
   // Step 2 local states
   const [floorCountInput, setFloorCountInput] = useState('1');
@@ -122,15 +101,8 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
   ]);
 
   // Step 4 local states
-  const [useMasterListMode, setUseMasterListMode] = useState(false);
-  const [depSearch, setDepSearch] = useState('');
-  const [selectedMasterIds, setSelectedMasterIds] = useState<Set<string>>(new Set());
-  const [showCustomDepModal, setShowCustomDepModal] = useState(false);
-  const [customDepTypeId, setCustomDepTypeId] = useState('');
-  const [customDepText, setCustomDepText] = useState('');
 
   // Step 5 local states: Matrix (roomId_depId)
-  const [selectedPairs, setSelectedPairs] = useState<Set<string>>(new Set());
 
   // Step 6 local states: Escalation & Terms
   const [l2After, setL2After] = useState(3);
@@ -150,20 +122,14 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
         { data: rms, error: rErr },
         { data: aTypes, error: atErr },
         { data: ags, error: agErr },
-        { data: mDeps, error: mdErr },
-        { data: pDeps, error: pdErr },
         { data: settings },
-        { data: items },
       ] = await Promise.all([
         sb.from('projects').select('*').eq('id', projectId).single(),
         sb.from('floors').select('*').eq('project_id', projectId).order('sort'),
         sb.from('rooms').select('*').eq('project_id', projectId).order('sort'),
         sb.from('agency_types').select('*').order('sort'),
         sb.from('agencies').select('*, agency_contacts(*)').eq('project_id', projectId),
-        sb.from('master_dependencies').select('id, agency_type_id, seq, text').eq('active', true).order('seq'),
-        sb.from('project_dependencies').select('*').eq('project_id', projectId).order('seq'),
         sb.from('app_settings').select('*'),
-        sb.from('dependency_items').select('room_id, project_dependency_id').eq('project_id', projectId),
       ]);
 
       if (pErr) throw new Error(pErr.message);
@@ -171,8 +137,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
       if (rErr) throw new Error(rErr.message);
       if (atErr) throw new Error(atErr.message);
       if (agErr) throw new Error(agErr.message);
-      if (mdErr) throw new Error(mdErr.message);
-      if (pdErr) throw new Error(pdErr.message);
 
       let activeFloors = fls ?? [];
       // O1: Floors default to 1 pre-filled floor
@@ -199,8 +163,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
       }
       setAgencyTypes(aTypes ?? []);
       setAgencies((ags as Agency[]) ?? []);
-      setMasterDeps(mDeps ?? []);
-      setProjectDeps(pDeps ?? []);
 
       // Presets
       const presetsVal = (settings as { key: string; value: unknown }[] | null)?.find((s) => s.key === 'room_presets')?.value;
@@ -216,12 +178,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
         setTermsText(proj.terms ?? '');
       }
 
-      // Existing items
-      const existing = (items ?? []) as { room_id: string; project_dependency_id: string }[];
-      setExistingItems(existing);
-      const pairSet = new Set<string>();
-      existing.forEach((i) => pairSet.add(`${i.room_id}_${i.project_dependency_id}`));
-      setSelectedPairs(pairSet);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load project');
     } finally {
@@ -518,90 +474,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
     }
   }
 
-  // ───────────────────────── STEP 4: DEPENDENCIES ─────────────────────────
-  async function handleAddSelectedMaster() {
-    if (selectedMasterIds.size === 0) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const sb = supabaseBrowser();
-      const idsArray = Array.from(selectedMasterIds);
-      const { error: err } = await sb.rpc('add_master_dependencies', {
-        p_project: projectId,
-        p_master_ids: idsArray,
-      });
-      if (err) throw err;
-      setSelectedMasterIds(new Set());
-      await loadAll();
-      showSuccessNotice(`Added master dependencies`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add master dependencies');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleAddCustomDep(e: React.FormEvent) {
-    e.preventDefault();
-    if (!customDepTypeId || !customDepText.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const sb = supabaseBrowser();
-      const { error: err } = await sb.from('project_dependencies').insert({
-        project_id: projectId,
-        agency_type_id: customDepTypeId,
-        text: customDepText.trim(),
-        master_dependency_id: null,
-      });
-      if (err) throw err;
-      setShowCustomDepModal(false);
-      setCustomDepText('');
-      await loadAll();
-      showSuccessNotice('Custom dependency added');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add custom dependency');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  // ───────────────────────── STEP 5: APPLY TO ROOMS ─────────────────────────
-  async function handleApplyDependencies() {
-    setSaving(true);
-    setError(null);
-    try {
-      const sb = supabaseBrowser();
-      const depIds = projectDeps.map((d) => d.id);
-      const roomIds = rooms.map((r) => r.id);
-
-      if (depIds.length === 0 || roomIds.length === 0) {
-        showSuccessNotice('No dependencies or rooms to apply');
-        setCurrentStep(6);
-        return;
-      }
-
-      // In Step 5, we call RPC apply_dependencies with selected pairs
-      // The RPC takes p_dep_ids and p_room_ids as arrays, or we can insert directly into dependency_items
-      // Let's call rpc('apply_dependencies', { p_project, p_dep_ids: depIds, p_room_ids: roomIds })
-      const { error: err } = await sb.rpc('apply_dependencies', {
-        p_project: projectId,
-        p_dep_ids: depIds,
-        p_room_ids: roomIds,
-      });
-      if (err) throw err;
-
-      await loadAll();
-      showSuccessNotice('Dependencies applied to rooms');
-      setCurrentStep(6);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to apply dependencies');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  // ───────────────────────── STEP 6: ESCALATION & TERMS ─────────────────────────
+  // ───────────────────────── STEP 5: ESCALATION & TERMS ─────────────────────────
   async function handleFinishSetup(e: React.FormEvent) {
     e.preventDefault();
     if (l3After <= l2After) {
@@ -638,22 +511,13 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
     );
   }
 
-  const stepsList = isClassic
-    ? [
-        { num: 1, label: 'Basics' },
-        { num: 2, label: 'Floors & Rooms' },
-        { num: 3, label: 'Agencies' },
-        { num: 4, label: 'Bulk Dependencies' },
-        { num: 5, label: 'Apply Grid' },
-        { num: 6, label: 'Escalation' },
-      ]
-    : [
-        { num: 1, label: 'Basics' },
-        { num: 2, label: 'Floors & Rooms' },
-        { num: 3, label: 'Agencies' },
-        { num: 4, label: 'Room Dependencies' },
-        { num: 5, label: 'Escalation' },
-      ];
+  const stepsList = [
+    { num: 1, label: 'Basics' },
+    { num: 2, label: 'Floors & Rooms' },
+    { num: 3, label: 'Agencies' },
+    { num: 4, label: 'Room Products' },
+    { num: 5, label: 'Escalation' },
+  ];
 
   return (
     <div className="min-h-dvh bg-surface-alt pb-16">
@@ -677,19 +541,9 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                 Project Setup: {project?.name}
               </h1>
               <p className="text-xs text-text-secondary mt-0.5">
-                Step {currentStep} of {isClassic ? 6 : 5} — Each step saves immediately. You can exit and resume anytime.
+                Step {currentStep} of 5 — Each step saves immediately. You can exit and resume anytime.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setIsClassic(!isClassic);
-                if (currentStep > 3) setCurrentStep(4);
-              }}
-              className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline shrink-0"
-            >
-              {isClassic ? 'Switch to Office room-by-room setup →' : 'Switch to Classic matrix setup →'}
-            </button>
           </div>
         </div>
 
@@ -1301,36 +1155,18 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
         })()}
 
         {/* ───────────────────────── STEP 4 (OFFICE MODE): ROOM-BY-ROOM PRODUCTS ───────────────────────── */}
-        {!isClassic && currentStep === 4 && (
+        {currentStep === 4 && (
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h2 className="text-base font-semibold text-text-primary">
-                  {useMasterListMode ? 'Step 4: Room-by-Room Dependencies (Master List)' : 'Step 4: Room-by-Room Products'}
+                  Step 4: Room-by-Room Products
                 </h2>
                 <p className="text-xs text-text-secondary mt-0.5">
-                  {useMasterListMode
-                    ? 'Configure trade dependencies room by room from the 78-item master list.'
-                    : 'Place the products VTech sells in each room with location and step tracking.'}
+                  Place the products VTech sells in each room with location and step tracking.
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setUseMasterListMode(!useMasterListMode)}
-                  className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors"
-                >
-                  {useMasterListMode ? 'Switch to Product Picker (v3)' : 'Use master dependency list (classic)'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsClassic(true)}
-                  className="text-xs text-accent hover:underline text-left sm:text-right"
-                >
-                  Switch to classic bulk matrix setup →
-                </button>
-              </div>
             </div>
 
             {rooms.length === 0 ? (
@@ -1344,14 +1180,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                   ← Go to Step 2: Floors &amp; Rooms
                 </button>
               </div>
-            ) : useMasterListMode ? (
-              <RoomDependencyPicker
-                projectId={projectId}
-                roomId={wizardRoomId || rooms[0]?.id}
-                onRoomChange={(newId) => setWizardRoomId(newId)}
-                onFinish={() => setCurrentStep(5)}
-                isWizard={true}
-              />
             ) : (
               <RoomProductPicker
                 projectId={projectId}
@@ -1359,7 +1187,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                 onRoomChange={(newId) => setWizardRoomId(newId)}
                 onFinish={() => setCurrentStep(5)}
                 isWizard={true}
-                onSwitchToMasterList={() => setUseMasterListMode(true)}
               />
             )}
 
@@ -1382,254 +1209,11 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
           </div>
         )}
 
-        {/* ───────────────────────── STEP 4 (CLASSIC MODE): BULK MASTER PICK ───────────────────────── */}
-        {isClassic && currentStep === 4 && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-text-primary">Dependencies Checklist (Classic)</h2>
-                <p className="text-xs text-text-secondary">
-                  Pick dependencies from VTech&apos;s approved master list or add site-specific custom items.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsClassic(false)}
-                  className="text-xs text-accent hover:underline"
-                >
-                  Switch to room-by-room setup
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowCustomDepModal(true)}
-                  className="inline-flex items-center gap-1 rounded-lg bg-surface-alt px-3 py-2 text-xs font-medium text-text-primary border border-border hover:bg-border transition-colors"
-                >
-                  + Add Custom Item
-                </button>
-              </div>
-            </div>
-
-            {/* Currently picked dependencies summary */}
-            <div className="rounded-xl border border-border bg-surface p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Project Dependencies ({projectDeps.length})
-                </span>
-              </div>
-              {projectDeps.length === 0 ? (
-                <p className="text-xs text-text-muted italic">No dependencies added to project yet.</p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto">
-                  {projectDeps.map((pd) => (
-                    <span
-                      key={pd.id}
-                      className="inline-flex items-center rounded-md bg-surface-alt px-2 py-0.5 text-xs text-text-primary border border-border"
-                    >
-                      {pd.text}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Master list picker */}
-            <div className="rounded-2xl border border-border bg-surface p-5 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <h3 className="text-sm font-bold text-text-primary">Master List (78 Items)</h3>
-                <input
-                  type="text"
-                  placeholder="Search master dependencies…"
-                  value={depSearch}
-                  onChange={(e) => setDepSearch(e.target.value)}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs focus:border-accent w-full sm:w-60"
-                />
-              </div>
-
-              {agencyTypes.map((type) => {
-                const typeMasterDeps = masterDeps.filter(
-                  (d) =>
-                    d.agency_type_id === type.id &&
-                    (!depSearch || d.text.toLowerCase().includes(depSearch.toLowerCase()))
-                );
-                if (typeMasterDeps.length === 0) return null;
-
-                const alreadyPickedIds = new Set(
-                  projectDeps.filter((pd) => pd.master_dependency_id).map((pd) => pd.master_dependency_id)
-                );
-
-                const unpicked = typeMasterDeps.filter((d) => !alreadyPickedIds.has(d.id));
-
-                return (
-                  <div key={type.id} className="border-t border-border pt-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-bold text-text-primary">{type.name}</span>
-                      {unpicked.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const newSet = new Set(selectedMasterIds);
-                            unpicked.forEach((d) => newSet.add(d.id));
-                            setSelectedMasterIds(newSet);
-                          }}
-                          className="text-xs text-accent hover:underline"
-                        >
-                          Select all ({unpicked.length})
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="space-y-1.5">
-                      {typeMasterDeps.map((dep) => {
-                        const isAlreadyPicked = alreadyPickedIds.has(dep.id);
-                        const isSelected = selectedMasterIds.has(dep.id);
-
-                        return (
-                          <label
-                            key={dep.id}
-                            className={`flex items-start gap-2.5 rounded-lg p-2 text-xs transition-colors cursor-pointer ${
-                              isAlreadyPicked
-                                ? 'bg-surface-alt/60 opacity-60 cursor-not-allowed'
-                                : isSelected
-                                ? 'bg-accent/10 border border-accent/20'
-                                : 'hover:bg-surface-alt'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              disabled={isAlreadyPicked}
-                              checked={isAlreadyPicked || isSelected}
-                              onChange={(e) => {
-                                const next = new Set(selectedMasterIds);
-                                if (e.target.checked) next.add(dep.id);
-                                else next.delete(dep.id);
-                                setSelectedMasterIds(next);
-                              }}
-                              className="mt-0.5 rounded text-accent focus:ring-accent"
-                            />
-                            <span className="flex-1 text-text-primary">
-                              {dep.text}
-                              {isAlreadyPicked && (
-                                <span className="ml-2 text-[10px] text-text-muted">(added)</span>
-                              )}
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {selectedMasterIds.size > 0 && (
-                <div className="sticky bottom-4 pt-2">
-                  <button
-                    type="button"
-                    disabled={saving}
-                    onClick={handleAddSelectedMaster}
-                    className="w-full rounded-lg bg-accent px-4 py-2.5 text-xs font-semibold text-white shadow-md hover:bg-accent-hover transition-colors"
-                  >
-                    {saving ? 'Adding…' : `Add ${selectedMasterIds.size} Selected Dependencies to Project`}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Navigation buttons */}
-            <div className="flex justify-between pt-2">
-              <button
-                type="button"
-                onClick={() => setCurrentStep(3)}
-                className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-surface transition-colors"
-              >
-                ← Back
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentStep(5)}
-                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-accent-hover transition-colors"
-              >
-                Next: Apply to Rooms →
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ───────────────────────── STEP 5 (CLASSIC MODE): APPLY GRID ───────────────────────── */}
-        {isClassic && currentStep === 5 && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-base font-semibold text-text-primary">Apply Dependencies to Rooms (Classic Matrix)</h2>
-              <p className="text-xs text-text-secondary mt-0.5">
-                Matrix: {projectDeps.length} dependencies × {rooms.length} rooms ({existingItems.length} currently applied).
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-border bg-surface p-5 shadow-xs">
-              <p className="text-xs text-text-secondary mb-4">
-                By default, all chosen dependencies apply to all rooms in the project. You can untick any dependency not applicable to specific rooms or floors.
-              </p>
-
-              <div className="flex gap-2 mb-4">
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={handleApplyDependencies}
-                  className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-accent-hover transition-colors"
-                >
-                  {saving ? 'Applying…' : 'Apply All to All Rooms'}
-                </button>
-              </div>
-
-              {/* Summary table */}
-              <div className="space-y-3">
-                {floors.map((floor) => {
-                  const floorRooms = rooms.filter((r) => r.floor_id === floor.id);
-                  return (
-                    <div key={floor.id} className="rounded-xl border border-border p-3 bg-surface-alt">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-bold text-xs text-text-primary">{floor.label}</span>
-                        <span className="text-xs text-text-muted">{floorRooms.length} rooms</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {floorRooms.map((r) => (
-                          <span key={r.id} className="rounded bg-surface px-2 py-1 text-xs text-text-secondary border border-border">
-                            {r.name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Navigation buttons */}
-            <div className="flex justify-between pt-2">
-              <button
-                type="button"
-                onClick={() => setCurrentStep(4)}
-                className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-surface transition-colors"
-              >
-                ← Back
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentStep(6)}
-                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-accent-hover transition-colors"
-              >
-                Next: Escalation &amp; Terms →
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* ───────────────────────── ESCALATION & TERMS STEP ───────────────────────── */}
-        {((!isClassic && currentStep === 5) || (isClassic && currentStep === 6)) && (
+        {currentStep === 5 && (
           <div className="rounded-2xl border border-border bg-surface p-6 shadow-xs">
             <h2 className="text-base font-semibold text-text-primary mb-1">
-              Step {isClassic ? 6 : 5}: Escalation Policy &amp; Terms
+              Step 5: Escalation Policy &amp; Terms
             </h2>
             <p className="text-xs text-text-secondary mb-4">
               Configure reminder thresholds and general disclaimer terms for site visit reports.
@@ -1703,7 +1287,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
               <div className="flex justify-between pt-4 border-t border-border">
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(isClassic ? 5 : 4)}
+                  onClick={() => setCurrentStep(4)}
                   className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-surface-alt transition-colors"
                 >
                   ← Back
@@ -1974,61 +1558,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
           </div>
         )}
 
-        {/* Add Custom Dependency Modal */}
-        {showCustomDepModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-            <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-5 shadow-xl">
-              <h3 className="text-base font-bold mb-3">Add Custom Dependency</h3>
-              <form onSubmit={handleAddCustomDep} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-text-secondary mb-1">Agency Type</label>
-                  <select
-                    required
-                    value={customDepTypeId}
-                    onChange={(e) => setCustomDepTypeId(e.target.value)}
-                    className="w-full rounded-lg border border-border px-3 py-2 text-xs focus:border-accent"
-                  >
-                    <option value="">Select type…</option>
-                    {agencyTypes.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-secondary mb-1">Dependency Text</label>
-                  <textarea
-                    required
-                    rows={3}
-                    placeholder="e.g. Ensure motorized curtain track conduit has 25mm clearance"
-                    value={customDepText}
-                    onChange={(e) => setCustomDepText(e.target.value)}
-                    className="w-full rounded-lg border border-border px-3 py-2 text-xs focus:border-accent"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCustomDepModal(false)}
-                    className="rounded-lg border border-border px-3 py-1.5 text-xs text-text-secondary"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="rounded-lg bg-accent px-4 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
-                  >
-                    {saving ? 'Adding…' : 'Add Item'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

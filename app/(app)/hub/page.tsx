@@ -213,7 +213,7 @@ function Dashboard() {
         const g = gateByLine.get(l.id) ?? [];
         const st = lineStatus(g);
         const shownSteps = showAllSteps ? [...g].sort((a, b) => a.seq - b.seq) : st.visible;
-        const involved = [...new Set((st.visible.length ? st.visible : g.filter((x) => !isDone(x.status))).map((x) => agencyName(x.agency_id)).filter(Boolean))] as string[];
+        const involved = [...new Set(st.visible.filter((x) => !isDone(x.status)).map((x) => agencyName(x.agency_id)).filter(Boolean))] as string[];
         return { line: l, gate: g, st, shownSteps, involved };
       })
       .filter(({ line, gate: g, st, involved }) => {
@@ -463,7 +463,7 @@ function Dashboard() {
                             <span className="md:hidden text-xs text-text-muted">Location: </span>{line.location ?? '—'}
                             {sortBy !== 'room' && <span className="block text-xs text-text-muted">{where(line.room_id)}</span>}
                           </div>
-                          <div className="text-sm text-text-secondary"><span className="md:hidden text-xs text-text-muted">Agency: </span>{involved.length ? involved.join(', ') : '—'}</div>
+                          <div className="text-sm text-text-secondary"><span className="md:hidden text-xs text-text-muted">Agency: </span>{involved.length ? (<span title={involved.join(', ')}>{involved.slice(0, 2).join(', ')}{involved.length > 2 ? ` +${involved.length - 2}` : ''}</span>) : '—'}</div>
                           <div className="text-sm tabular-nums md:text-right"><span className="md:hidden text-xs text-text-muted">Qty: </span>{line.quantity}</div>
                           <div className="flex flex-wrap items-center gap-1.5">
                             {needsSteps ? (
