@@ -435,8 +435,8 @@ function Dashboard() {
 
             {/* matrix */}
             <div className="mt-4">
-              <div className="hidden grid-cols-[minmax(170px,1.3fr)_minmax(130px,1fr)_minmax(120px,1fr)_52px_minmax(240px,2.4fr)] gap-3 border-b border-border px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-text-secondary md:grid">
-                <span>Product</span><span>Location</span><span>Agency involved</span><span className="text-right">Qty</span><span>Status</span>
+              <div className="hidden grid-cols-[minmax(200px,1.5fr)_minmax(120px,0.9fr)_56px_minmax(280px,2.6fr)] gap-4 border-b border-border px-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-text-secondary md:grid">
+                <span>Product</span><span>Location</span><span className="text-right">Qty</span><span>Status</span>
               </div>
               {detailLoading && <div className="flex justify-center py-10"><Spinner /></div>}
               {!detailLoading && groups.length === 0 && (
@@ -454,33 +454,36 @@ function Dashboard() {
                       const needsSteps = !line.product_id && lg.length === 0;
                       const spec = [line.brand, line.make, line.model].filter(Boolean).join(' · ');
                       return (
-                        <li key={line.id} data-line={line.id} className="grid grid-cols-1 gap-2 bg-surface px-3 py-3 md:grid-cols-[minmax(170px,1.3fr)_minmax(130px,1fr)_minmax(120px,1fr)_52px_minmax(240px,2.4fr)] md:items-center md:gap-3">
+                        <li key={line.id} data-line={line.id} className="grid grid-cols-1 gap-3 bg-surface px-4 py-3.5 transition-colors hover:bg-surface-alt/40 md:grid-cols-[minmax(200px,1.5fr)_minmax(120px,0.9fr)_56px_minmax(280px,2.6fr)] md:items-center md:gap-4">
                           <div className="min-w-0">
                             <p className="font-semibold">{titleOf(line)}{!line.product_id && <span className="ml-1.5 rounded bg-warning-light px-1 text-[10px] font-semibold uppercase text-warning">not in list</span>}</p>
                             {spec && <p className="truncate text-xs text-text-muted">{spec}</p>}
+                            {involved.length > 0 && (
+                              <p className="mt-1 flex items-center gap-1 text-xs text-text-secondary" title={involved.join(', ')}>
+                                <Glyph name="building" className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+                                <span className="truncate">Waiting on {involved.slice(0, 2).join(', ')}{involved.length > 2 ? ` +${involved.length - 2}` : ''}</span>
+                              </p>
+                            )}
                           </div>
                           <div className="text-sm">
                             <span className="md:hidden text-xs text-text-muted">Location: </span>{line.location ?? '—'}
                             {sortBy !== 'room' && <span className="block text-xs text-text-muted">{where(line.room_id)}</span>}
                           </div>
-                          <div className="text-sm text-text-secondary"><span className="md:hidden text-xs text-text-muted">Agency: </span>{involved.length ? (<span title={involved.join(', ')}>{involved.slice(0, 2).join(', ')}{involved.length > 2 ? ` +${involved.length - 2}` : ''}</span>) : '—'}</div>
                           <div className="text-sm tabular-nums md:text-right"><span className="md:hidden text-xs text-text-muted">Qty: </span>{line.quantity}</div>
-                          <div className="flex flex-wrap items-center gap-1.5">
+                          <div className="min-w-0">
                             {needsSteps ? (
-                              <button type="button" onClick={() => setCustomFor(line)} className="inline-flex items-center gap-1 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-semibold text-white">
+                              <button type="button" onClick={() => setCustomFor(line)} className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white">
                                 <Glyph name="plus" /> Add dependencies
                               </button>
-                            ) : st.waitingTrigger && !showAllSteps ? (
-                              <span className="inline-flex items-center gap-1.5 rounded-lg bg-surface-alt px-2.5 py-1.5 text-xs text-text-secondary">
-                                <Glyph name="clock" /> {triggerText(lg[0]?.catalogue_title ?? null, progress)}
-                              </span>
-                            ) : st.allDone && !showAllSteps ? (
-                              <span className="inline-flex items-center gap-1 rounded-lg bg-success-light px-2.5 py-1.5 text-xs font-semibold text-success"><Glyph name="check" /> All {st.total} done</span>
                             ) : (
-                              <>
-                                {shownSteps.map((s) => <StepChip key={s.item_id} row={s} onClick={() => setStepRow(s)} />)}
-                                {!showAllSteps && st.done > 0 && <span className="text-[11px] text-text-muted">✓ {st.done}/{st.total}</span>}
-                              </>
+                              <StatusCell
+                                steps={lg}
+                                st={st}
+                                shown={shownSteps}
+                                showAll={showAllSteps}
+                                waitingText={st.waitingTrigger ? triggerText(lg[0]?.catalogue_title ?? null, progress) : null}
+                                onOpen={(r) => setStepRow(r)}
+                              />
                             )}
                           </div>
                         </li>
@@ -525,28 +528,76 @@ function Dashboard() {
   );
 }
 
-function StepChip({ row, onClick }: { row: GateRow; onClick: () => void }) {
+/** Status: a slim progress track (one segment per step, in sheet colours) and the step(s) to act on now. */
+function StatusCell({ steps, st, shown, showAll, waitingText, onOpen }: {
+  steps: GateRow[]; st: ReturnType<typeof lineStatus>; shown: GateRow[]; showAll: boolean; waitingText: string | null; onOpen: (r: GateRow) => void;
+}) {
+  const ordered = [...steps].sort((a, b) => a.seq - b.seq);
+  const current = new Set(st.visible.map((r) => r.item_id));
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 gap-[3px]" aria-hidden>
+          {ordered.map((r) => {
+            const c = stepColour(r.sheet_colour);
+            const done = isDone(r.status);
+            const now = current.has(r.item_id) && !done;
+            return (
+              <span
+                key={r.item_id}
+                title={`${r.label}: ${done ? 'done' : now ? 'not done' : 'later'}`}
+                className="h-1.5 min-w-[6px] flex-1 rounded-full"
+                style={{
+                  background: done ? c.ring : now ? c.bg : 'rgba(132,124,163,0.18)',
+                  boxShadow: now ? `0 0 0 1.5px ${c.ring}` : undefined,
+                }}
+              />
+            );
+          })}
+        </div>
+        <span className="shrink-0 text-[11px] font-semibold tabular-nums text-text-secondary">{st.done}/{st.total}</span>
+      </div>
+      {waitingText && !showAll ? (
+        <p className="inline-flex items-center gap-1.5 rounded-full bg-surface-alt px-3 py-1 text-xs text-text-secondary"><Glyph name="clock" className="h-3.5 w-3.5" /> {waitingText}</p>
+      ) : st.allDone && !showAll ? (
+        <p className="inline-flex items-center gap-1.5 rounded-full bg-success-light px-3 py-1 text-xs font-semibold text-success"><Glyph name="check" className="h-3.5 w-3.5" /> All {st.total} steps done</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {shown.map((r) => <StepPill key={r.item_id} row={r} onClick={() => onOpen(r)} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StepPill({ row, onClick }: { row: GateRow; onClick: () => void }) {
   const c = stepColour(row.sheet_colour);
   const done = isDone(row.status);
-  const tip = done ? `${row.label}: done` : row.locked ? `${row.label}: opens later` : `${row.label}: not done${row.stuck_reason ? ` — ${row.stuck_reason}` : ''}`;
+  const locked = row.locked && !done;
+  const tip = done ? `${row.label}: done` : locked ? `${row.label}: opens later` : `${row.label}: not done${row.stuck_reason ? ` — ${row.stuck_reason}` : ''}`;
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={row.locked && !done}
+      disabled={locked}
       title={tip}
       aria-label={tip}
-      className={`inline-flex max-w-full items-center gap-1.5 rounded-lg py-1 pl-1 pr-2 text-xs font-medium transition hover:brightness-95 disabled:cursor-not-allowed ${row.locked && !done ? 'opacity-45' : ''}`}
-      style={{ background: c.bg, color: c.text, boxShadow: `inset 0 0 0 1px ${c.ring}` }}
+      className={`group inline-flex max-w-full items-center gap-2 rounded-full border bg-white/85 py-1 pl-1 pr-3 text-left text-xs shadow-[0_1px_2px_rgba(25,17,58,0.06)] transition hover:-translate-y-px hover:shadow-[0_4px_12px_-4px_rgba(74,23,208,0.35)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 ${
+        done ? 'border-success/30' : locked ? 'border-border' : 'border-danger/25'
+      }`}
     >
       <span
-        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[13px] font-bold ${done ? 'bg-success text-white' : row.locked ? 'bg-white/70 text-text-muted' : 'bg-white text-danger'}`}
-        style={{ boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.12)' }}
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+          done ? 'bg-success text-white' : locked ? 'bg-surface-alt text-text-muted' : 'bg-white text-danger ring-[1.5px] ring-danger/70'
+        }`}
       >
-        {done ? '✓' : row.locked ? <Glyph name="lock" className="h-3 w-3" /> : '✗'}
+        <Glyph name={done ? 'check' : locked ? 'lock' : 'cross'} className="h-3 w-3" />
       </span>
-      <span className="truncate">{row.label}</span>
-      {!done && row.stuck_reason && <span className="hidden truncate opacity-75 lg:inline">· {row.stuck_reason}</span>}
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c.bg, boxShadow: `0 0 0 1px ${c.ring}` }} />
+      <span className="min-w-0">
+        <span className={`block truncate font-medium ${done ? 'text-text-secondary line-through decoration-text-muted/50' : 'text-text-primary'}`}>{row.label}</span>
+        {!done && row.stuck_reason && <span className="block truncate text-[11px] text-danger/80">{row.stuck_reason}</span>}
+      </span>
     </button>
   );
 }
