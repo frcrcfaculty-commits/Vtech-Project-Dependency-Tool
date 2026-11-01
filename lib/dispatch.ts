@@ -14,7 +14,7 @@ type One<T> = T | T[] | null;
 const one = <T,>(v: One<T>): T => (Array.isArray(v) ? v[0] : v) as T;
 
 interface ItemRow {
-  id: string; agency_id: string | null; first_raised_on: string | null; reminder_count: number; note: string | null;
+  id: string; agency_id: string | null; first_raised_on: string | null; reminder_count: number; note: string | null; stuck_reason?: string | null;
   rooms: One<{ name: string; sort: number; floors: One<{ label: string; sort: number }> }>;
   project_dependencies: One<{ text: string; seq: number }>;
 }
@@ -47,7 +47,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
     db.from('agencies').select('id, company_name, escalation_enabled, agency_types(name, internal), agency_contacts(id, name, designation, level, email, phone, active)')
       .eq('project_id', visit.project_id),
     db.from('dependency_items')
-      .select('id, agency_id, first_raised_on, reminder_count, note, rooms!inner(name, sort, floors!inner(label, sort)), project_dependencies!inner(text, seq)')
+      .select('id, agency_id, first_raised_on, reminder_count, note, stuck_reason, rooms!inner(name, sort, floors!inner(label, sort)), project_dependencies!inner(text, seq)')
       .eq('project_id', visit.project_id).eq('status', 'pending'),
   ]);
   if (!project) throw new HttpError(404, 'Project not found');
@@ -71,7 +71,7 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
     const list = byAgency.get(r.agency_id) ?? [];
     list.push({
       itemId: r.id, floorLabel: floor.label, floorSort: floor.sort, roomName: room.name, roomSort: room.sort,
-      seq: dep.seq, text: dep.text, firstRaisedOn: r.first_raised_on, reminderCount: r.reminder_count, note: r.note,
+      seq: dep.seq, text: dep.text, firstRaisedOn: r.first_raised_on, reminderCount: r.reminder_count, note: [r.stuck_reason, r.note].filter(Boolean).join(' · ') || null,
     });
     byAgency.set(r.agency_id, list);
   }

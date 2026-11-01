@@ -60,3 +60,23 @@ Legend: ✅ test = an automated test proves it · ✅ checked = verified from th
 
 ## Still open (decisions, not code)
 See docs/SPEC.md §8.
+
+## v4 — status of Hansal's 15 points (2026-11-01)
+Run: live Supabase + local production build (Vercel Sandbox, bom1): **e2e 30/30**, `test:sql` **102**, unit **34**, typecheck + build clean.
+Screenshots: `e2e/evidence/v4/`.
+
+| # | Point | Status | Evidence |
+|---|---|---|---|
+| — | Archive the current app before removing anything | ✅ | branches `archive/v3`, `archive/all-workflows-2026-10-31` (git tags are refused by this environment's git proxy) |
+| 1 | Same colours; glass, opaque icons (iOS 26 style) | ✅ | `components/glass-icon.tsx`, glass app icon; tiles, header, actions, floating button |
+| 2–5 | New project from BOQ import, consolidated sheet, agencies (External / VTech Internal), agency ↔ product | ⬜ next phase | asked to do the Dashboard first; backend ready: `add_boq_line` (brand/make/model, unknown products) |
+| 6 | 5 header titles, current one highlighted | ✅ | Dashboard · Pending · Projects · Reports (super admins) · Admin |
+| 7 | "VTech Dashboard", active projects, closed & finished toggle top right | ✅ | `products.browser.e2e` + screenshot; status `finished` (migration 0009) |
+| 8 | Old master list removed; Hansal sheet products; location mismatch → top-right notification, PM validates, nothing blocked | ✅ | view `location_checks`, bell; SQL tests "unusual speaker location flagged", "Other → any location ok" |
+| 9 | Dependencies from the Hansal tab, colour coded | ✅ | catalogue re-checked against the sheet on 2026-11-01 (2 colour fixes on Client Side) |
+| 10 | Project bar: filters, reminders, Edit (logged: why + who asked), Close, Delete (Vipul/Hansal) | ✅ | `project_changes`; e2e "Edit project details logs why and who asked" |
+| 11 | Sort room / floor / product; matrix Product · Location · Agency · Qty · Status; ✓/✗ checkboxes; ✗ → HansalV2 reasons; products not in the list → notification + manual dependencies | ✅ | e2e "✗ asks why (HansalV2 reasons)…", "Floating + Add: a BOQ product not in the list…" |
+| 12 | Greens first; then one step at a time in the same space | ✅ | view `item_gate`; SQL + e2e "only Installation appears… Sound testing waits for it" |
+| 13 | iPhone programming at 50 % installation; client items at 80 % programming | ✅ | view `project_progress`; SQL tests for both triggers |
+| 14 | Floating Add dependency on every page | ✅ | `components/v4/add-dependency-fab.tsx`; e2e |
+| 15 | Reminders to the agencies causing delay; WhatsApp + email; polite email listing their pending items | ✅ | `lib/report.ts`; unit test "v4 polite wording"; office API e2e checks the wording in real drafts |

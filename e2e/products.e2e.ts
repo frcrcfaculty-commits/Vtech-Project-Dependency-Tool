@@ -81,7 +81,7 @@ test('add_room_product: room scope creates the full step chain (unchecked, owner
   expect(rp.rooms).toMatchObject({ name: 'Handover & client', floors: { label: 'Project-wide' } });
   const cs = await steps(s.rp.clientSide);
   expect(cs).toHaveLength(9);
-  expect(cs.every((g) => !g.locked)).toBe(true); // no green steps → open from the start
+  expect(cs.every((g) => g.locked)).toBe(true); // v4: client side waits until 80% of programming is done
   expect((await place('iPhone programming', null)).length).toBe(36);
   expect(ok(await lead.db.from('rooms').select('id').eq('project_id', s.projectId).eq('name', 'Handover & client'), 'pw rooms')).toHaveLength(1);
 
@@ -89,7 +89,7 @@ test('add_room_product: room scope creates the full step chain (unchecked, owner
   expect(bad.error?.message).toMatch(/room is required/);
 });
 
-test('gate: three greens pending together; Installation AND Sound testing locked until all greens are Done/N.A., then open together; N.A. allowed when locked', async () => {
+test('gate (v4): three greens pending together; later steps locked until all greens are Done/N.A., then open one at a time; N.A. allowed when locked', async () => {
   // Keypad: 3 greens pending at once
   for (const l of ['Engraving submitted', 'Readiness to install', 'Readiness of dustfree']) ok(await setStatus((await step(s.rp.keypad, l)).item_id, 'pending'), l);
   expect((await steps(s.rp.keypad)).filter((g) => g.phase === 1 && g.status === 'pending')).toHaveLength(3);
@@ -111,9 +111,9 @@ test('gate: three greens pending together; Installation AND Sound testing locked
   expect(mid.filter((g) => g.phase === 2).map((g) => [g.label, g.locked])).toEqual([['Installation', true], ['Sound testing', true]]);
   ok(await setStatus(greens[2].item_id, 'complete'), 'g3');
   const after = await steps(s.rp.speakers);
-  expect(after.filter((g) => g.phase === 2).map((g) => [g.label, g.locked])).toEqual([['Installation', false], ['Sound testing', false]]);
+  expect(after.filter((g) => g.phase === 2).map((g) => [g.label, g.locked])).toEqual([['Installation', false], ['Sound testing', true]]); // v4: one at a time
   ok(await setStatus((await step(s.rp.speakers, 'Installation')).item_id, 'pending'), 'installation pending now allowed');
-  expect(ok(await lead.db.rpc('item_is_locked', { p_item: (await step(s.rp.speakers, 'Sound testing')).item_id }), 'is_locked')).toBe(false);
+  expect(ok(await lead.db.rpc('item_is_locked', { p_item: (await step(s.rp.speakers, 'Sound testing')).item_id }), 'is_locked')).toBe(true);
 
   // Door lock: blue "Readiness by carpenter" (external) is locked until greens are done
   s.rp.door = await place('Door lock', s.room2, 'Door frame');
@@ -179,6 +179,8 @@ test('reminders: Client step never drafted (warning); internal step → "[Intern
   // Blue: Switch/Router "Internet activation" → Network Agency (external, not [Internal])
   s.rp.router = await place('Switch /Router', s.room2, 'AV Rack');
   await closeGreens(s.rp.router);
+  // v4: after the greens, one step at a time — Installation and Configuration come before Internet activation
+  for (const l of ['Installation', 'Configuration']) ok(await setStatus((await step(s.rp.router, l)).item_id, 'complete'), l);
   const net = await step(s.rp.router, 'Internet activation');
   expect(net).toMatchObject({ phase: 2, responsibility: 'external', locked: false });
   ok(await setStatus(net.item_id, 'pending'), 'net pending');

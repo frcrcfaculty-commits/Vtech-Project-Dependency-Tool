@@ -304,7 +304,13 @@ select public.set_item_status((select item_id from t_s where seq=2), 'complete')
 select pg_temp.assert(public.item_is_locked((select item_id from t_s where seq=4)), 'still locked with one green open');
 select public.set_item_status((select item_id from t_s where seq=3), 'na');
 select pg_temp.assert(not public.item_is_locked((select item_id from t_s where seq=4)), 'installation unlocks once all greens done/N.A.');
-select pg_temp.assert(not public.item_is_locked((select item_id from t_s where seq=5)), 'all other colours unlock together (sound testing too)');
+select pg_temp.assert(public.item_is_locked((select item_id from t_s where seq=5)), 'v4: sound testing waits for installation (one step at a time)');
+select public.set_item_status((select item_id from t_s where seq=4), 'pending', null, null, null, 'Waiting for ladder');
+select pg_temp.assert((select stuck_reason from public.dependency_items where id=(select item_id from t_s where seq=4)) = 'Waiting for ladder', 'v4: stuck reason stored');
+select pg_temp.assert((select reason from public.item_events where item_id=(select item_id from t_s where seq=4) order by created_at desc limit 1) = 'Waiting for ladder', 'v4: stuck reason in history');
+select public.set_item_status((select item_id from t_s where seq=4), 'complete');
+select pg_temp.assert((select stuck_reason from public.dependency_items where id=(select item_id from t_s where seq=4)) is null, 'v4: reason cleared when done');
+select pg_temp.assert(not public.item_is_locked((select item_id from t_s where seq=5)), 'v4: sound testing opens after installation');
 select pg_temp.assert((select responsibility from public.dependency_items where id=(select item_id from t_s where seq=4)) = 'internal', 'installation step is internal');
 select pg_temp.assert((select waits_on_client from public.item_gate where item_id=(select item_id from t_s where seq=1)), 'delivery step waits on client by default');
 create temp table t_cp as select public.copy_floor((select floor_id from public.rooms where id=(select id from t_room)), '13th Floor copy') as id;
@@ -313,8 +319,52 @@ select pg_temp.assert((select count(*) from public.dependency_items i join publi
 -- project-scope product goes to the project-wide room
 create temp table t_cs as select public.add_room_product((select id from public.projects limit 1), null, (select id from public.product_catalogue where title='Client Side')) as id;
 select pg_temp.assert((select r.name from public.room_products rp join public.rooms r on r.id=rp.room_id where rp.id=(select id from t_cs)) = 'Handover & client', 'project-scope product placed in project-wide room');
-select pg_temp.assert((select count(*) from public.item_gate where room_product_id=(select id from t_cs) and waits_on_client) = 1, 'AMC team intro waits on client');
-select pg_temp.assert((select count(*) from public.item_gate where room_product_id=(select id from t_cs) and not locked) = 9, 'client-side: no greens, all 9 steps open');
+select pg_temp.assert((select count(*) from public.item_gate where room_product_id=(select id from t_cs) and waits_on_client) = 0, 'v4: AMC team intro is now the VTech PM (sheet 2026-11-01)');
+select pg_temp.assert((select count(*) from public.item_gate where room_product_id=(select id from t_cs) and locked and waiting_trigger) = 9, 'v4: client side waits for 80% programming');
+-- the speaker line (qty 1) is in installation, its floor copy is not; add a wifi line (qty 3) still in greens → 1/5 = 20%
+create temp table t_kp as select public.add_room_product((select id from public.projects limit 1), (select id from t_room), (select id from public.product_catalogue where title='Wifi Access point'), 'Ceiling', 3) as id;
+create temp table t_ip as select public.add_room_product((select id from public.projects limit 1), null, (select id from public.product_catalogue where title='iPhone programming')) as id;
+select pg_temp.assert((select bool_and(locked and waiting_trigger) from public.item_gate where room_product_id=(select id from t_ip)), 'v4: iPhone programming waits for 50% installation');
+select pg_temp.assert((select installation_pct from public.project_progress where project_id=(select id from public.projects limit 1)) < 50, 'v4: installation below 50% with a new line in greens');
+select pg_temp.assert((select bool_and(locked) from public.item_gate where room_product_id=(select id from t_ip)), 'v4: iPhone still waiting below 50%');
+update public.dependency_items set status='na' where room_product_id=(select id from t_kp) and step_id in (select id from public.product_steps where phase=1);
+select pg_temp.assert((select installation_pct from public.project_progress where project_id=(select id from public.projects limit 1)) >= 50, 'v4: installation reaches 50%');
+select pg_temp.assert((select count(*) from public.item_gate where room_product_id=(select id from t_ip) and not locked) = 1, 'v4: iPhone first step opens at 50% (then one at a time)');
+-- programming 80%: mark every light-red step outside client side done
+update public.dependency_items i set status='complete' from public.product_steps s join public.product_catalogue p on p.id=s.product_id
+ where i.step_id=s.id and s.sheet_colour='F4CCCC' and p.title<>'Client Side' and i.project_id=(select id from public.projects limit 1);
+select pg_temp.assert((select count(*) from public.item_gate where room_product_id=(select id from t_cs) and not locked) = 1, 'v4: client side opens after 80% programming, one step at a time');
+select public.remove_room_product((select id from t_ip));
+select public.remove_room_product((select id from t_kp));
+-- BOQ line not in the catalogue + hand-made steps
+create temp table t_bq as select public.add_boq_line((select id from public.projects limit 1), (select id from t_room), 'Motorised TV lift', 'Wall', 1, 'Nexus', 'NX', 'L-200') as id;
+select pg_temp.assert((select product_id is null and boq_title='Motorised TV lift' and brand='Nexus' and model='L-200' from public.room_products where id=(select id from t_bq)), 'v4: unknown BOQ product kept with brand/make/model');
+select pg_temp.assert((select check_result from public.location_checks where room_product_id=(select id from t_bq)) = 'not_in_catalogue', 'v4: unknown product flagged');
+select public.add_custom_step((select id from t_bq), 'Wall niche ready', 1, 'external', null);
+select public.add_custom_step((select id from t_bq), 'Installation', 2, 'internal', null);
+select pg_temp.assert((select string_agg(label || ':' || locked, ',' order by seq) from public.item_gate where room_product_id=(select id from t_bq)) = 'Wall niche ready:false,Installation:true', 'v4: hand-made steps follow the same gate');
+create temp table t_kw as select public.add_boq_line((select id from public.projects limit 1), (select id from t_room), 'keypad', 'Ceiling', 2, 'Lutron', null, null) as id;
+select pg_temp.assert((select title from public.item_gate where room_product_id=(select id from t_kw) limit 1) = 'Keypad', 'v4: known BOQ product gets its catalogue steps');
+select pg_temp.assert((select check_result from public.location_checks where room_product_id=(select id from t_kw)) = 'ok', 'v4: keypad allows Other → any location ok');
+create temp table t_sw as select public.add_boq_line((select id from public.projects limit 1), (select id from t_room), 'Speakers', 'Bathroom mirror', 1) as id;
+select pg_temp.assert((select check_result from public.location_checks where room_product_id=(select id from t_sw)) = 'mismatch', 'v4: unusual speaker location flagged');
+-- reason re-assigns the waiting agency (project has an Electrician agency)
+select public.set_item_status((select item_id from public.item_gate where room_product_id=(select id from t_sw) and label='Readiness of cable'), 'pending', null, null, null, 'Work pending from electrician');
+select pg_temp.assert((select t.name from public.dependency_items i join public.agencies a on a.id=i.agency_id join public.agency_types t on t.id=a.agency_type_id
+  where i.id=(select item_id from public.item_gate where room_product_id=(select id from t_sw) and label='Readiness of cable')) = 'Electrician', 'v4: reason "electrician" points the item at the electrician');
+-- project change log is append-only and needs reason + requester
+insert into public.project_changes (project_id, requested_by, reason, changes) values ((select id from public.projects limit 1), 'Vipul', 'Client renamed', '[{"what":"Client name","from":"a","to":"b"}]');
+select pg_temp.assert((select count(*) from public.project_changes) = 1, 'v4: change logged');
+do $$ begin
+  insert into public.project_changes (project_id, requested_by, reason) values ((select id from public.projects limit 1), 'Vipul', ' ');
+  raise exception 'should have failed';
+exception when check_violation then raise notice 'ok - change needs a reason';
+end $$;
+update public.project_changes set reason = 'x';
+select pg_temp.assert((select reason from public.project_changes limit 1) = 'Client renamed', 'v4: change log cannot be edited');
+update public.projects set status = 'finished' where id = (select id from public.projects limit 1);
+select pg_temp.assert((select status from public.projects limit 1) = 'finished', 'v4: projects can be finished');
+update public.projects set status = 'active';
 -- remove
 select public.remove_room_product((select id from t_cs));
 select pg_temp.assert((select count(*) from public.dependency_items where room_product_id=(select id from t_cs)) = 0, 'remove_room_product removes its steps');
