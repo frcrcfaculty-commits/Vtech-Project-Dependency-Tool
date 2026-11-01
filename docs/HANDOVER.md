@@ -14,7 +14,7 @@ escalates by reminder count, and Vipul gets a weekly digest and PDFs.
 | Thing | Where |
 |---|---|
 | Code | https://github.com/frcrcfaculty-commits/Vtech-Project-Dependency-Tool (branch `main` = production) |
-| Live app | https://vtech-dependency-tracker.vercel.app |
+| Live app | https://vtech-dependency-tracker.vercel.app (moving to Zo Computer: `docs/ZO_MIGRATION.md`) |
 | Hosting | Vercel team `hansalpersonalai-7040s-projects`, project `vtech-dependency-tracker` (id `prj_ZzgZRtZMfCVdxbzINYW2aYaYc5w0`), region bom1, **free (Hobby) plan**, auto-deploys every push to `main` |
 | Database/Auth/Storage | Supabase project `vtech-dependency-tracker`, ref `jqjoxlunlbmwyxowvkyf`, Mumbai, **free plan** — dashboard https://supabase.com/dashboard/project/jqjoxlunlbmwyxowvkyf |
 | SQL editor (apply migrations) | https://supabase.com/dashboard/project/jqjoxlunlbmwyxowvkyf/sql/new |

@@ -14,7 +14,8 @@ jobs:
   health:
     runs-on: ubuntu-latest
     env:
-      APP: https://vtech-dependency-tracker.vercel.app
+      # Live app URL. After the move to Zo set the repo variable APP_URL (Settings → Variables) to the Zo URL.
+      APP: ${{ vars.APP_URL || 'https://vtech-dependency-tracker.vercel.app' }}
       SUPABASE_URL: https://jqjoxlunlbmwyxowvkyf.supabase.co
       # Public anon key (already shipped to every browser). RLS applies.
       SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impxam94bHVubGJtd3l4b3d2a3lmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMxNzExODcsImV4cCI6MjEwODc0NzE4N30.DQcua4poW5n7B-X30vcvXTKlY-gdtz_DKzPuE49DXF8
@@ -25,6 +26,12 @@ jobs:
           echo "/login: $code"
           test "$code" = 200 || { echo "::error::/login returned $code"; exit 1; }
           grep -q 'VTech' page.html || { echo "::error::/login did not render the app"; exit 1; }
+
+      - name: Health endpoint answers
+        run: |
+          code=$(curl -s -o health.json -w '%{http_code}' --retry 2 "$APP/api/health")
+          echo "/api/health: $code $(cat health.json)"
+          test "$code" = 200 || { echo "::error::/api/health returned $code"; exit 1; }
 
       - name: Supabase answers (and stays awake)
         run: |
