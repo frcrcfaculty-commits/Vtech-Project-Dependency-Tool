@@ -1,5 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["bom1"],
-  "crons": [{ "path": "/api/cron/weekly-digest", "schedule": "30 2 * * 1" }]
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "destination": "https://vtech-hansal.zocomputer.io/$1",
+      "permanent": true
+    }
+  ]
 }

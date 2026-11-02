@@ -14,8 +14,8 @@ escalates by reminder count, and Vipul gets a weekly digest and PDFs.
 | Thing | Where |
 |---|---|
 | Code | https://github.com/frcrcfaculty-commits/Vtech-Project-Dependency-Tool (branch `main` = production) |
-| Live app | https://vtech-dependency-tracker.vercel.app (moving to Zo Computer: `docs/ZO_MIGRATION.md`) |
-| Hosting | Vercel team `hansalpersonalai-7040s-projects`, project `vtech-dependency-tracker` (id `prj_ZzgZRtZMfCVdxbzINYW2aYaYc5w0`), region bom1, **free (Hobby) plan**, auto-deploys every push to `main` |
+| Live app | https://vtech-hansal.zocomputer.io (redirects from https://vtech-dependency-tracker.vercel.app) |
+| Hosting | Zo Computer (Basic plan), one Service running `scripts/zo/run.sh`; Vercel kept as permanent redirect and rollback |
 | Database/Auth/Storage | Supabase project `vtech-dependency-tracker`, ref `jqjoxlunlbmwyxowvkyf`, Mumbai, **free plan** — dashboard https://supabase.com/dashboard/project/jqjoxlunlbmwyxowvkyf |
 | SQL editor (apply migrations) | https://supabase.com/dashboard/project/jqjoxlunlbmwyxowvkyf/sql/new |
 | Product catalogue source | Google Sheet "Ashutosh Project Status", tab **"Hansal"** — https://docs.google.com/spreadsheets/d/1yWx6z6mkbqic78XTSxXg8Oe3wcD-CMYQ1J9dX6Omv08 |
@@ -26,7 +26,7 @@ escalates by reminder count, and Vipul gets a weekly digest and PDFs.
 
 ## 3. Stack
 Next.js 16 (App Router, React 19, Tailwind 4) · `@supabase/ssr` · Supabase Postgres 17 with **RLS doing all access control** ·
-Vercel functions + Vercel Cron (Mondays 02:30 UTC weekly digest) · pdf-lib for PDFs · Vitest (unit) · SQL tests on local Postgres ·
+Zo Computer Service (Next.js server + Monday 02:30 UTC weekly digest cron in `scripts/zo/run.sh`) · Vercel (redirect & rollback) · pdf-lib for PDFs · Vitest (unit) · SQL tests on local Postgres ·
 Playwright e2e (`e2e/`, run manually against a local prod build or preview) · GitHub Actions CI on every PR/push: typecheck, unit, SQL, build.
 
 **The deployed app holds no service-role key.** Privileged actions are narrow SECURITY DEFINER functions:
