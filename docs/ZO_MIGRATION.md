@@ -1,6 +1,6 @@
 # Moving hosting from Vercel to Zo Computer
 
-Status (2026-11-01): the repo is ready. The Zo side (sections 3–6) still has to be done on the Zo machine.
+Status (2026-11-02): Live on Zo Computer at https://vtech-hansal.zocomputer.io. Testing auto-deploy.
 
 ## 1. What moves and what stays (decision)
 | Piece | Before | After | Why |
