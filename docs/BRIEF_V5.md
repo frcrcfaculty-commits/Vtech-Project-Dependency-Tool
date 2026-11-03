@@ -54,6 +54,7 @@ and **Send Email · Send WhatsApp**. A category with 0 pending items shows "Noth
 **B1 — migration `supabase/migrations/0010_v5_agencies_reminders.sql`** (+ SQL tests in `tests/sql/10_behaviour_test.sql`, add file to `scripts/test-sql.sh`):
 - `agency_types`: add `active boolean not null default true`, `side text check (side in ('external','internal'))`, `contact_slots int`,
   `sort` reused for display order. Insert `PMC / Architect / Client person` and `VTECH Sales Team`. Set active/side/slots per §3; all others inactive.
+- `agency_contacts`: add `designation text` (nullable). AV Vendor is also retired.
 - Remap `product_steps.default_agency_type_id` and `step_reasons.agency_type` per the table above.
 - `reminder_categories (key text pk, label text, sort int, item_agency_type_id uuid null references agency_types)` — null = all items.
 - `reminder_category_recipients (category_key text references reminder_categories, agency_type_id uuid references agency_types, default_checked boolean, sort int, primary key (category_key, agency_type_id))`.
