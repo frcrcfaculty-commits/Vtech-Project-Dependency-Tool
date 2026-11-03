@@ -16,13 +16,12 @@ import { StepDialog, type AgencyOption } from '@/components/v4/step-dialog';
 import { EditProjectDialog } from '@/components/v4/edit-project-dialog';
 import { CustomStepsDialog } from '@/components/v4/custom-steps-dialog';
 import { DASHBOARD_CHANGED } from '@/components/v4/notifications-bell';
-import { isEscalated } from '@/lib/client/escalation';
 import { LEGEND_ORDER, STEP_COLOURS, isDone, lineStatus, stepColour, triggerText, type GateRow } from '@/lib/client/steps';
 
 type ProjectStatus = 'active' | 'on_hold' | 'closed' | 'finished';
 interface ProjectTile {
   id: string; name: string; client_name: string | null; site_address: string | null; status: ProjectStatus;
-  l2_after: number; l3_after: number; pending: number; escalated: number; done: number; total: number;
+  pending: number; done: number; total: number;
 }
 interface Floor { id: string; label: string; sort: number }
 interface Room { id: string; floor_id: string; name: string; sort: number }
@@ -31,8 +30,8 @@ interface Line {
   id: string; room_id: string; product_id: string | null; boq_title: string | null; location: string | null; quantity: number;
   brand: string | null; make: string | null; model: string | null; product_catalogue: { title: string; scope: string } | null;
 }
-type SortBy = 'room' | 'floor' | 'product';
-type StatusFilter = 'all' | 'open' | 'stuck' | 'escalated' | 'done';
+type SortBy = 'room' | 'agency' | 'product';
+type StatusFilter = 'all' | 'open' | 'stuck' | 'done';
 
 const STATUS_BADGE: Record<ProjectStatus, string> = { active: 'Active', on_hold: 'On hold', closed: 'Closed', finished: 'Finished' };
 
@@ -82,24 +81,23 @@ function Dashboard() {
     setError(null);
     const sb = supabaseBrowser();
     const [{ data: ps, error: pErr }, { data: its, error: iErr }] = await Promise.all([
-      sb.from('projects').select('id, name, client_name, site_address, status, l2_after, l3_after').order('name'),
-      sb.from('dependency_items').select('project_id, status, reminder_count'),
+      sb.from('projects').select('id, name, client_name, site_address, status').order('name'),
+      sb.from('dependency_items').select('project_id, status'),
     ]);
     if (pErr || iErr) { setError((pErr ?? iErr)!.message); setLoading(false); return; }
-    const stats = new Map<string, { pending: number; escalated: number; done: number; total: number }>();
-    const thresholds = new Map<string, number>((ps ?? []).map((p: { id: string; l2_after: number | null }) => [p.id, p.l2_after ?? 3]));
-    for (const i of (its ?? []) as { project_id: string; status: string; reminder_count: number }[]) {
-      const s = stats.get(i.project_id) ?? { pending: 0, escalated: 0, done: 0, total: 0 };
+    const stats = new Map<string, { pending: number; done: number; total: number }>();
+    for (const i of (its ?? []) as { project_id: string; status: string }[]) {
+      const s = stats.get(i.project_id) ?? { pending: 0, done: 0, total: 0 };
       s.total++;
-      if (i.status === 'pending') { s.pending++; if (isEscalated(i.reminder_count, thresholds.get(i.project_id))) s.escalated++; }
+      if (i.status === 'pending') s.pending++;
       if (i.status === 'complete' || i.status === 'na') s.done++;
       stats.set(i.project_id, s);
     }
-    const tiles: ProjectTile[] = (ps ?? []).map((p: { id: string; name: string; client_name: string | null; site_address: string | null; status: string; l2_after: number | null; l3_after: number | null }) => ({
+    const tiles: ProjectTile[] = (ps ?? []).map((p: { id: string; name: string; client_name: string | null; site_address: string | null; status: string }) => ({
       id: p.id, name: p.name, client_name: p.client_name, site_address: p.site_address, status: (p.status ?? 'active') as ProjectStatus,
-      l2_after: p.l2_after ?? 3, l3_after: p.l3_after ?? 6, ...(stats.get(p.id) ?? { pending: 0, escalated: 0, done: 0, total: 0 }),
+      ...(stats.get(p.id) ?? { pending: 0, done: 0, total: 0 }),
     }));
-    tiles.sort((a, b) => b.escalated - a.escalated || b.pending - a.pending || a.name.localeCompare(b.name));
+    tiles.sort((a, b) => b.pending - a.pending || a.name.localeCompare(b.name));
     setProjects(tiles);
     setLoading(false);
     return tiles;
@@ -118,20 +116,23 @@ function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [stepAgencyTypes, setStepAgencyTypes] = useState<Map<string, string>>(new Map());
+
   // ── selected project ──
   const loadDetails = useCallback(async (id: string) => {
     if (!id) return;
     setDetailLoading(true);
     const sb = supabaseBrowser();
-    const [f, r, a, l, g, pr] = await Promise.all([
+    const [f, r, a, l, g, pr, ps] = await Promise.all([
       sb.from('floors').select('id, label, sort').eq('project_id', id).order('sort'),
       sb.from('rooms').select('id, floor_id, name, sort').eq('project_id', id).order('sort'),
       sb.from('agencies').select('id, company_name, agency_types(name, internal)').eq('project_id', id),
       sb.from('room_products').select('id, room_id, product_id, boq_title, location, quantity, brand, make, model, product_catalogue(title, scope)').eq('project_id', id),
       sb.from('item_gate').select('*').eq('project_id', id).order('seq'),
       sb.from('project_progress').select('installation_pct, programming_pct').eq('project_id', id).maybeSingle(),
+      sb.from('product_steps').select('id, agency_types(name)'),
     ]);
-    const err = [f, r, a, l, g, pr].find((x) => x.error)?.error;
+    const err = [f, r, a, l, g, pr, ps].find((x) => x.error)?.error;
     if (err) setError(err.message);
     setFloors((f.data ?? []) as Floor[]);
     setRooms((r.data ?? []) as Room[]);
@@ -139,6 +140,11 @@ function Dashboard() {
     setLines((l.data ?? []) as unknown as Line[]);
     setGate((g.data ?? []) as GateRow[]);
     setProgress({ installation: Number(pr.data?.installation_pct ?? 0), programming: Number(pr.data?.programming_pct ?? 0) });
+    const stepMap = new Map<string, string>();
+    for (const s of (ps.data ?? []) as unknown as { id: string; agency_types: { name: string } | null }[]) {
+      if (s.agency_types?.name) stepMap.set(s.id, s.agency_types.name);
+    }
+    setStepAgencyTypes(stepMap);
     setDetailLoading(false);
   }, []);
 
@@ -222,38 +228,98 @@ function Dashboard() {
         if (statusFilter === 'done') return st.allDone;
         if (statusFilter === 'open') return !st.allDone;
         if (statusFilter === 'stuck') return st.visible.some((x) => x.status === 'pending');
-        if (statusFilter === 'escalated') return g.some((x) => x.status === 'pending' && isEscalated(x.reminder_count, selected?.l2_after));
         void involved;
         return true;
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, gateByLine, showAllSteps, search, agencyFilter, statusFilter, selected?.l2_after, roomById, floorById, agencyById]);
+  }, [lines, gateByLine, showAllSteps, search, agencyFilter, statusFilter, roomById, floorById, agencyById]);
 
   const groups = useMemo(() => {
-    const m = new Map<string, { key: string; label: string; sub?: string; order: number[]; rows: typeof rows }>();
+    const m = new Map<string, { key: string; label: string; sub?: string; order: (number | string)[]; rows: typeof rows }>();
     for (const r of rows) {
-      const room = roomById.get(r.line.room_id); const floor = room ? floorById.get(room.floor_id) : undefined;
+      const room = roomById.get(r.line.room_id);
+      const floor = room ? floorById.get(room.floor_id) : undefined;
       const scope = r.line.product_catalogue?.scope;
-      let key: string, label: string, sub: string | undefined, order: number[];
+
       if (sortBy === 'product') {
-        key = titleOf(r.line).toLowerCase(); label = titleOf(r.line); order = [scope === 'project' ? 1 : 0, 0];
-      } else if (sortBy === 'floor') {
-        key = floor?.id ?? 'none'; label = floor?.label ?? 'No floor'; order = [floor?.sort ?? 9999, 0];
+        const key = titleOf(r.line).toLowerCase();
+        const label = titleOf(r.line);
+        const order = [scope === 'project' ? 1 : 0, label];
+        const gr = m.get(key) ?? { key, label, order, rows: [] as typeof rows };
+        gr.rows.push(r);
+        m.set(key, gr);
+      } else if (sortBy === 'agency') {
+        // Agency-wise key = the item's agency (agency_id), label = agency company name + type,
+        // fallback group "Unassigned — <default agency type>".
+        const waitingSteps = r.st.visible.filter((x) => !isDone(x.status));
+        const activeSteps = waitingSteps.length > 0 ? waitingSteps : r.gate.filter((x) => !isDone(x.status));
+        const targetSteps = activeSteps.length > 0 ? activeSteps : (r.gate.length > 0 ? [r.gate[0]] : [{ agency_id: null, step_id: null }]);
+
+        const seenKeys = new Set<string>();
+        for (const step of targetSteps) {
+          let key: string;
+          let label: string;
+          let order: (number | string)[];
+
+          const agency = step.agency_id ? agencyById.get(step.agency_id) : undefined;
+          if (agency) {
+            key = agency.id;
+            const typeName = agency.agency_types?.name;
+            label = typeName ? `${agency.company_name} · ${typeName}` : agency.company_name;
+            order = [agency.agency_types?.internal ? 1 : 0, label];
+          } else {
+            const defaultType = step.step_id ? stepAgencyTypes.get(step.step_id) : undefined;
+            const typeLabel = defaultType || 'General';
+            key = `unassigned-${typeLabel.toLowerCase()}`;
+            label = `Unassigned — ${typeLabel}`;
+            order = [2, label];
+          }
+
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            const gr = m.get(key) ?? { key, label, order, rows: [] as typeof rows };
+            gr.rows.push(r);
+            m.set(key, gr);
+          }
+        }
       } else {
-        key = room?.id ?? 'none'; label = room?.name ?? 'No room'; sub = floor?.label; order = [floor?.sort ?? 9999, room?.sort ?? 0];
+        // Room-wise keeps the floor as sub-label
+        const key = room?.id ?? 'none';
+        const label = room?.name ?? 'No room';
+        const sub = floor?.label;
+        const order = [floor?.sort ?? 9999, room?.sort ?? 0];
+        const gr = m.get(key) ?? { key, label, sub, order, rows: [] as typeof rows };
+        gr.rows.push(r);
+        m.set(key, gr);
       }
-      const gr = m.get(key) ?? { key, label, sub, order, rows: [] as typeof rows };
-      gr.rows.push(r); m.set(key, gr);
     }
-    const list = [...m.values()].sort((a, b) => a.order[0] - b.order[0] || a.order[1] - b.order[1] || a.label.localeCompare(b.label));
+    const list = [...m.values()].sort((a, b) => {
+      for (let i = 0; i < Math.max(a.order.length, b.order.length); i++) {
+        const valA = a.order[i] ?? 0;
+        const valB = b.order[i] ?? 0;
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          if (valA !== valB) return valA - valB;
+        } else {
+          const cmp = String(valA).localeCompare(String(valB));
+          if (cmp !== 0) return cmp;
+        }
+      }
+      return a.label.localeCompare(b.label);
+    });
     for (const g of list) {
-      g.rows.sort((a, b) => sortBy === 'product'
-        ? where(a.line.room_id).localeCompare(where(b.line.room_id))
-        : titleOf(a.line).localeCompare(titleOf(b.line)) || (a.line.location ?? '').localeCompare(b.line.location ?? ''));
+      g.rows.sort((a, b) => {
+        if (sortBy === 'product') {
+          return where(a.line.room_id).localeCompare(where(b.line.room_id));
+        }
+        if (sortBy === 'agency') {
+          return where(a.line.room_id).localeCompare(where(b.line.room_id)) || titleOf(a.line).localeCompare(titleOf(b.line));
+        }
+        return titleOf(a.line).localeCompare(titleOf(b.line)) || (a.line.location ?? '').localeCompare(b.line.location ?? '');
+      });
     }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, sortBy, roomById, floorById]);
+  }, [rows, sortBy, roomById, floorById, agencyById, stepAgencyTypes]);
 
   const totals = useMemo(() => {
     const open = gate.filter((g) => !isDone(g.status) && !g.locked);
@@ -335,7 +401,6 @@ function Dashboard() {
                     <p className="truncate text-xs text-text-secondary">{p.client_name ?? 'No client name'}</p>
                   </div>
                   {p.status !== 'active' && <span className="rounded-md bg-surface-alt px-1.5 py-0.5 text-[10px] font-semibold uppercase text-text-secondary">{STATUS_BADGE[p.status]}</span>}
-                  {p.escalated > 0 && <span className="rounded-md bg-danger-light px-1.5 py-0.5 text-[10px] font-semibold text-danger">{p.escalated} esc</span>}
                 </div>
                 <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-alt"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
                 <p className="mt-1.5 text-xs text-text-secondary"><span className="font-semibold text-text-primary">{pct}%</span> done · {p.pending} not done</p>
@@ -397,7 +462,7 @@ function Dashboard() {
             {/* filters (same as before) + sort */}
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
               <div role="radiogroup" aria-label="Sort" className="inline-flex w-full rounded-xl border border-border bg-surface-alt p-1 sm:w-auto">
-                {([['room', 'Room-wise', 'rooms'], ['floor', 'Floor-wise', 'floors'], ['product', 'Product-wise', 'products']] as const).map(([k, label, icon]) => (
+                {([['room', 'Room-wise', 'rooms'], ['agency', 'Agency-wise', 'agencies'], ['product', 'Product-wise', 'products']] as const).map(([k, label, icon]) => (
                   <button key={k} type="button" role="radio" aria-checked={sortBy === k} onClick={() => setSortBy(k)}
                     className={`inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 font-medium transition sm:flex-none sm:px-3 ${sortBy === k ? 'bg-surface text-accent shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}>
                     <Glyph name={icon} /> {label}
@@ -408,7 +473,6 @@ function Dashboard() {
                 <option value="all">All lines ({lines.length})</option>
                 <option value="open">Open lines</option>
                 <option value="stuck">Not done (with a reason)</option>
-                <option value="escalated">Escalated (L2+)</option>
                 <option value="done">Fully done</option>
               </select>
               <select aria-label="Agency filter" value={agencyFilter} onChange={(e) => setAgencyFilter(e.target.value)} className="w-full rounded-xl border border-border px-3 py-2 sm:w-auto sm:max-w-[16rem]">
@@ -445,7 +509,7 @@ function Dashboard() {
               {!detailLoading && groups.map((g) => (
                 <div key={g.key} className="mt-4">
                   <h3 className="flex items-center gap-2 px-1 text-sm font-semibold">
-                    <GlassIcon name={sortBy === 'product' ? 'products' : sortBy === 'floor' ? 'floors' : 'rooms'} size={24} tint="clear" />
+                    <GlassIcon name={sortBy === 'product' ? 'products' : sortBy === 'agency' ? 'agencies' : 'rooms'} size={24} tint="clear" />
                     {g.label}{g.sub ? <span className="font-normal text-text-secondary">· {g.sub}</span> : null}
                     <span className="text-xs font-normal text-text-muted">({g.rows.length})</span>
                   </h3>
@@ -518,7 +582,7 @@ function Dashboard() {
       )}
       {editing && selected && (
         <EditProjectDialog
-          project={{ id: selected.id, name: selected.name, client_name: selected.client_name, site_address: selected.site_address, status: selected.status, l2_after: selected.l2_after, l3_after: selected.l3_after }}
+          project={{ id: selected.id, name: selected.name, client_name: selected.client_name, site_address: selected.site_address, status: selected.status }}
           lines={lines.map((l) => ({ id: l.id, title: titleOf(l), room: where(l.room_id), location: l.location, quantity: l.quantity, brand: l.brand, make: l.make, model: l.model }))}
           onClose={() => setEditing(false)}
           onSaved={async (msg) => { setEditing(false); flash(msg); await refresh(); }}

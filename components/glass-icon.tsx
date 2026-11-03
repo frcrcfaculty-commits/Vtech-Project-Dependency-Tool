@@ -4,11 +4,12 @@
 import type { ReactNode } from 'react';
 
 export type GlyphName =
-  | 'building' | 'bell' | 'send' | 'edit' | 'lock' | 'trash' | 'archive' | 'rooms' | 'floors' | 'products'
+  | 'building' | 'bell' | 'send' | 'edit' | 'lock' | 'trash' | 'archive' | 'rooms' | 'floors' | 'products' | 'agencies'
   | 'check' | 'cross' | 'plus' | 'filter' | 'history' | 'clock' | 'alert' | 'phone' | 'mail' | 'flag' | 'reopen';
 
 const PATHS: Record<GlyphName, ReactNode> = {
   building: <><path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16" /><path d="M15 9h4a1 1 0 0 1 1 1v11" /><path d="M8 8h3M8 12h3M8 16h3M3 21h18" /></>,
+  agencies: <><path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16" /><path d="M15 9h4a1 1 0 0 1 1 1v11" /><path d="M8 8h3M8 12h3M8 16h3M3 21h18" /></>,
   bell: <><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" /><path d="M10 20a2 2 0 0 0 4 0" /></>,
   send: <><path d="M21 3 10 14" /><path d="M21 3 14.5 21l-4-7.5L3 9.5z" /></>,
   edit: <><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></>,

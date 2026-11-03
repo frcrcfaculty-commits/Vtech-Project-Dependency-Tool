@@ -12,7 +12,6 @@ interface ProjectSummary {
   clientName: string | null;
   siteAddress: string | null;
   pending: number;
-  escalated: number;
   closedThisWeek: number;
   oldestOpenDays: number | null;
   lastVisit: string | null;
@@ -29,7 +28,6 @@ interface DashboardSectionRaw {
   };
   pending: number;
   closedThisWeek: number;
-  escalated: number;
   oldest: number | null;
   byAgency: [string, number][];
 }
@@ -76,7 +74,6 @@ export default function ProjectsPage() {
           clientName: p.client_name,
           siteAddress: p.site_address,
           pending: sec?.pending ?? 0,
-          escalated: sec?.escalated ?? 0,
           closedThisWeek: sec?.closedThisWeek ?? 0,
           oldestOpenDays: sec?.oldest ?? null,
           lastVisit: sec?.project?.lastVisit ?? null,
@@ -84,8 +81,8 @@ export default function ProjectsPage() {
         };
       });
 
-      // Sort by escalated (descending), then pending (descending), then name
-      combined.sort((a, b) => b.escalated - a.escalated || b.pending - a.pending || a.name.localeCompare(b.name));
+      // Sort by pending (descending), then name
+      combined.sort((a, b) => b.pending - a.pending || a.name.localeCompare(b.name));
 
       setProjects(combined);
     } catch (err) {
@@ -207,11 +204,6 @@ export default function ProjectsPage() {
 
                   {/* Status Pills */}
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {p.escalated > 0 ? (
-                      <span className="inline-flex items-center rounded-md bg-danger-light px-2 py-0.5 text-xs font-semibold text-danger">
-                        {p.escalated} esc
-                      </span>
-                    ) : null}
                     <span
                       className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${
                         p.pending > 0

@@ -115,7 +115,6 @@ export default function ProjectHomePage({
   const [agencyModalMode, setAgencyModalMode] = useState<'external' | 'internal'>('external');
   const [newAgencyTypeId, setNewAgencyTypeId] = useState('');
   const [newAgencyCompany, setNewAgencyCompany] = useState('');
-  const [newAgencyEscalation, setNewAgencyEscalation] = useState(true);
   const [newAgencyContacts, setNewAgencyContacts] = useState<
     Array<{ name: string; designation: string; level: number; phone: string; email: string }>
   >([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
@@ -333,7 +332,7 @@ export default function ProjectHomePage({
           project_id: projectId,
           agency_type_id: newAgencyTypeId,
           company_name: newAgencyCompany.trim(),
-          escalation_enabled: newAgencyEscalation,
+          escalation_enabled: true,
         })
         .select('id')
         .single();
@@ -397,9 +396,6 @@ export default function ProjectHomePage({
   // Metrics
   const pendingItems = items.filter((i) => i.status === 'pending');
   const completedItems = items.filter((i) => i.status === 'complete');
-  const escalatedItems = pendingItems.filter(
-    (i) => i.reminder_count > (project?.l2_after ?? 3)
-  );
 
   // Pending breakdown by agency
   const pendingByAgency = new Map<string, number>();
@@ -442,11 +438,6 @@ export default function ProjectHomePage({
                 <h1 className="text-xl font-bold tracking-tight text-text-primary">
                   {project?.name}
                 </h1>
-                {escalatedItems.length > 0 && (
-                  <span className="inline-flex items-center rounded-md bg-danger-light px-2 py-0.5 text-xs font-bold text-danger">
-                    {escalatedItems.length} Escalated
-                  </span>
-                )}
               </div>
               {project?.client_name && (
                 <p className="text-xs text-text-secondary mt-0.5">
@@ -496,17 +487,11 @@ export default function ProjectHomePage({
         {activeTab === 'overview' && (
           <div className="space-y-5">
             {/* KPI Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-2xl border border-border bg-surface p-4 shadow-xs">
                 <p className="text-xs font-medium text-text-secondary">Pending Dependencies</p>
                 <p className="text-2xl font-bold text-warning mt-1">{pendingItems.length}</p>
                 <p className="text-[11px] text-text-muted mt-0.5">Across all rooms</p>
-              </div>
-
-              <div className="rounded-2xl border border-border bg-surface p-4 shadow-xs">
-                <p className="text-xs font-medium text-text-secondary">Escalated (L2+)</p>
-                <p className="text-2xl font-bold text-danger mt-1">{escalatedItems.length}</p>
-                <p className="text-[11px] text-text-muted mt-0.5">Threshold &gt; {project?.l2_after}</p>
               </div>
 
               <div className="rounded-2xl border border-border bg-surface p-4 shadow-xs">
@@ -636,7 +621,6 @@ export default function ProjectHomePage({
                       setAgencyModalMode('external');
                       setNewAgencyTypeId('');
                       setNewAgencyCompany('');
-                      setNewAgencyEscalation(true);
                       setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
                       setShowAddAgencyModal(true);
                     }}
@@ -650,7 +634,6 @@ export default function ProjectHomePage({
                       setAgencyModalMode('internal');
                       setNewAgencyTypeId('');
                       setNewAgencyCompany('');
-                      setNewAgencyEscalation(true);
                       setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
                       setShowAddAgencyModal(true);
                     }}
@@ -702,9 +685,6 @@ export default function ProjectHomePage({
                                 {agency.agency_types?.name ?? type?.name ?? 'Agency'}
                               </span>
                               <h5 className="text-base font-bold text-text-primary">{agency.company_name}</h5>
-                              <p className="text-xs text-text-secondary mt-0.5">
-                                Escalation: {agency.escalation_enabled ? 'Enabled' : 'Disabled'}
-                              </p>
                             </div>
                             <button
                               type="button"
@@ -724,9 +704,6 @@ export default function ProjectHomePage({
                                 <div>
                                   <span className="font-bold text-text-primary">{c.name}</span>
                                   <span className="text-text-muted ml-1">({c.designation})</span>
-                                  <span className="ml-1.5 rounded-sm bg-border px-1 py-0.2 text-[10px] font-bold text-text-secondary">
-                                    L{c.level}
-                                  </span>
                                 </div>
                                 <div className="text-text-secondary text-[11px]">
                                   {c.phone || c.email}
@@ -816,9 +793,6 @@ export default function ProjectHomePage({
                                 </span>
                               </div>
                               <h5 className="text-base font-bold text-text-primary">{agency.company_name}</h5>
-                              <p className="text-xs text-text-secondary mt-0.5">
-                                Escalation: {agency.escalation_enabled ? 'Enabled' : 'Disabled'}
-                              </p>
                             </div>
                             <button
                               type="button"
@@ -838,9 +812,6 @@ export default function ProjectHomePage({
                                 <div>
                                   <span className="font-bold text-text-primary">{c.name}</span>
                                   <span className="text-text-muted ml-1">({c.designation})</span>
-                                  <span className="ml-1.5 rounded-sm bg-border px-1 py-0.2 text-[10px] font-bold text-text-secondary">
-                                    L{c.level}
-                                  </span>
                                 </div>
                                 <div className="text-text-secondary text-[11px]">
                                   {c.phone || c.email}
@@ -864,7 +835,7 @@ export default function ProjectHomePage({
             <div className="rounded-2xl border border-border bg-surface p-5 shadow-xs">
               <h3 className="text-sm font-bold text-text-primary mb-2">Project Configuration</h3>
               <p className="text-xs text-text-secondary mb-4 leading-relaxed">
-                You can revisit the full 6-step project wizard anytime to add more floors, clone layouts, configure new trades, or edit escalation terms.
+                You can revisit the project setup wizard anytime to add more floors, clone layouts, or configure new trades.
               </p>
 
               <div className="flex flex-wrap gap-2">
@@ -925,25 +896,6 @@ export default function ProjectHomePage({
                   className="ml-2 rounded-lg border border-danger/40 bg-danger px-4 py-2 text-xs font-semibold text-white hover:opacity-90 transition-opacity"
                 />
               )}
-            </div>
-
-            {/* Current Escalation Policy Summary */}
-            <div className="rounded-2xl border border-border bg-surface p-5 shadow-xs">
-              <h3 className="text-sm font-bold text-text-primary mb-2">Escalation Policy</h3>
-              <div className="grid grid-cols-3 gap-3 text-center text-xs">
-                <div className="rounded-xl bg-surface-alt p-3">
-                  <p className="text-text-muted">L2 Threshold</p>
-                  <p className="text-lg font-bold text-text-primary mt-1">{project?.l2_after} reminders</p>
-                </div>
-                <div className="rounded-xl bg-surface-alt p-3">
-                  <p className="text-text-muted">L3 Threshold</p>
-                  <p className="text-lg font-bold text-text-primary mt-1">{project?.l3_after} reminders</p>
-                </div>
-                <div className="rounded-xl bg-surface-alt p-3">
-                  <p className="text-text-muted">CC Management</p>
-                  <p className="text-lg font-bold text-text-primary mt-1">Level &ge; {project?.mgmt_cc_level}</p>
-                </div>
-              </div>
             </div>
           </div>
         )}
@@ -1210,19 +1162,6 @@ export default function ProjectHomePage({
                   />
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="escToggleAg"
-                    checked={newAgencyEscalation}
-                    onChange={(e) => setNewAgencyEscalation(e.target.checked)}
-                    className="rounded text-accent focus:ring-accent"
-                  />
-                  <label htmlFor="escToggleAg" className="text-xs text-text-primary">
-                    Enable structured escalation for this agency
-                  </label>
-                </div>
-
                 {/* Contacts */}
                 <div className="border-t border-border pt-3">
                   <div className="flex items-center justify-between mb-2">
@@ -1269,20 +1208,7 @@ export default function ProjectHomePage({
                         />
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2">
-                        <select
-                          value={c.level}
-                          onChange={(e) => {
-                            const updated = [...newAgencyContacts];
-                            updated[idx].level = parseInt(e.target.value, 10) as 1 | 2 | 3;
-                            setNewAgencyContacts(updated);
-                          }}
-                          className="rounded-md border border-border bg-surface px-1 py-1 text-xs"
-                        >
-                          <option value={1}>L1 (Site)</option>
-                          <option value={2}>L2 (Manager)</option>
-                          <option value={3}>L3 (Owner)</option>
-                        </select>
+                      <div className="grid grid-cols-2 gap-2">
                         <input
                           type="tel"
                           placeholder="Phone"

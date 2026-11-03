@@ -302,19 +302,6 @@ export default function ReviewSendPage({
                           {isEmail ? '✉️ Email' : '💬 WhatsApp'}
                         </span>
 
-                        {/* Level badge — Red only for L3 escalation as required by taste-skill */}
-                        <span
-                          className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-bold ${
-                            d.level === 3
-                              ? 'bg-danger-light text-danger'
-                              : d.level === 2
-                              ? 'bg-warning-light text-warning'
-                              : 'bg-surface-alt text-text-secondary'
-                          }`}
-                        >
-                          {d.level === 1 ? 'L1 · First notice' : `L${d.level} Escalation`}
-                        </span>
-
                         <span className="text-xs text-text-muted">
                           {itemCount} {itemCount === 1 ? 'item' : 'items'}
                         </span>
