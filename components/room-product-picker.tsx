@@ -420,7 +420,7 @@ export function RoomProductPicker({
       {/* ── Notification Banner ── */}
       {notice && (
         <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs font-semibold text-emerald-700 animate-fadeIn flex items-center justify-between">
-          <span>✓ {notice}</span>
+          <span>{notice}</span>
           <button type="button" onClick={() => setNotice(null)} className="text-emerald-700 font-bold ml-2">
             ×
           </button>
@@ -428,7 +428,7 @@ export function RoomProductPicker({
       )}
       {error && (
         <div className="rounded-xl border border-danger/20 bg-danger/10 p-3 text-xs font-semibold text-danger flex items-center justify-between">
-          <span>⚠ {error}</span>
+          <span>{error}</span>
           <button type="button" onClick={() => setError(null)} className="text-danger font-bold ml-2">
             ×
           </button>
@@ -547,7 +547,7 @@ export function RoomProductPicker({
                 : 'border-border bg-surface-alt text-text-primary hover:border-accent/40'
             }`}
           >
-            <span>★ Project-wide (Handover &amp; Client)</span>
+            <span>Project-wide (Handover &amp; Client)</span>
             {placedProducts.filter((p) => p.product_catalogue?.scope === 'project').length > 0 && (
               <span
                 className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${

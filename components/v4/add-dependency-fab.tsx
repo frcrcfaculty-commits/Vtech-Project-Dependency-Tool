@@ -73,7 +73,7 @@ export function AddDependencyFab() {
     Promise.all([
       sb.from('rooms').select('id, name, sort, floors(label, sort)').eq('project_id', projectId),
       sb.from('room_products').select('id, room_id, location, boq_title, product_catalogue(title)').eq('project_id', projectId),
-      sb.from('agencies').select('id, company_name, agency_types(name, internal)').eq('project_id', projectId),
+      sb.from('agencies').select('id, company_name, agency_types(name, internal, active)').eq('project_id', projectId),
     ]).then(([r, l, a]) => {
       type R = { id: string; name: string; sort: number; floors: { label: string; sort: number } | null };
       const rs = ((r.data ?? []) as unknown as R[])
@@ -83,8 +83,12 @@ export function AddDependencyFab() {
       setRoomId((cur) => (rs.some((x) => x.id === cur) ? cur : rs[0]?.id ?? ''));
       type L = { id: string; room_id: string; location: string | null; boq_title: string | null; product_catalogue: { title: string } | null };
       setLines(((l.data ?? []) as unknown as L[]).map((x) => ({ id: x.id, room_id: x.room_id, location: x.location, title: x.product_catalogue?.title ?? x.boq_title ?? 'Product' })));
-      type A = { id: string; company_name: string; agency_types: { name: string; internal: boolean } | null };
-      setAgencies(((a.data ?? []) as unknown as A[]).map((x) => ({ id: x.id, label: `${x.agency_types?.name ?? 'Agency'} – ${x.company_name}`, internal: !!x.agency_types?.internal })));
+      type A = { id: string; company_name: string; agency_types: { name: string; internal: boolean; active?: boolean } | null };
+      setAgencies(
+        ((a.data ?? []) as unknown as A[])
+          .filter((x) => x.agency_types?.active !== false)
+          .map((x) => ({ id: x.id, label: `${x.agency_types?.name ?? 'Agency'} – ${x.company_name}`, internal: !!x.agency_types?.internal }))
+      );
     });
   }, [open, projectId]);
 
@@ -151,7 +155,7 @@ export function AddDependencyFab() {
       </button>
 
       {toast && (
-        <div role="status" className="fixed bottom-20 right-6 z-50 max-w-sm rounded-xl border border-success/30 bg-success-light px-4 py-2.5 text-sm font-medium text-success shadow-lg">✓ {toast}</div>
+        <div role="status" className="fixed bottom-20 right-6 z-50 max-w-sm rounded-xl border border-success/30 bg-success-light px-4 py-2.5 text-sm font-medium text-success shadow-lg">{toast}</div>
       )}
 
       {open && (

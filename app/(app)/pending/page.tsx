@@ -608,35 +608,9 @@ export default function PendingPage() {
     }
   };
 
-  // Quick Action: WhatsApp Now for a single item
-  const handleWhatsAppNow = async (item: PendingItem) => {
-    try {
-      setWhatsAppRowLoadingId(item.id);
-      setError(null);
-
-      const res = await fetch(`/api/projects/${item.project_id}/reminders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ itemIds: [item.id] }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Failed to create follow-up reminder (${res.status})`);
-      }
-
-      const data = await res.json();
-      if (data.visitId) {
-        router.push(`/projects/${item.project_id}/visits/${data.visitId}/dispatches`);
-      } else {
-        setNotice('No reminder dispatch created for this item.');
-        setTimeout(() => setNotice(null), 3000);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start WhatsApp reminder');
-    } finally {
-      setWhatsAppRowLoadingId(null);
-    }
+  // Quick Action: WhatsApp Now for a single item -> navigates to Reminders page
+  const handleWhatsAppNow = (item: PendingItem) => {
+    router.push(`/projects/${item.project_id}/reminders`);
   };
 
   // Multi-select Action: Send Reminders
@@ -660,12 +634,11 @@ export default function PendingPage() {
     if (queueList.length === 0) return;
 
     if (queueList.length === 1) {
-      // Single project: process immediately
-      processProjectReminders(queueList[0]);
+      // Single project: navigate to reminders page
+      router.push(`/projects/${queueList[0].projectId}/reminders`);
     } else {
-      // Multiple projects: show stepped queue modal
+      // Multiple projects: show list with one button per project
       setQueueProjects(queueList);
-      setCurrentQueueIndex(0);
     }
   };
 
@@ -860,7 +833,7 @@ export default function PendingPage() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/90 p-3.5 text-xs">
             <div className="space-y-0.5">
               <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                <span>👤 Client Dependencies</span>
+                <span>Client Dependencies</span>
               </div>
               <p className="text-amber-800 text-[11px]">
                 Items waiting on client decisions, selections, or site readiness. Never chased with automated reminders.
@@ -872,14 +845,14 @@ export default function PendingPage() {
                 onClick={handleCopyClientStatusNote}
                 className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 shadow-xs hover:bg-amber-100 transition-colors"
               >
-                📋 Copy status note
+                Copy status note
               </button>
               <button
                 type="button"
                 onClick={handleDownloadClientPendingPdf}
                 className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 shadow-xs hover:bg-amber-100 transition-colors"
               >
-                📄 Download client-pending PDF
+                Download client-pending PDF
               </button>
             </div>
           </div>
@@ -1399,19 +1372,15 @@ export default function PendingPage() {
             <div className="border-b border-border/60 pb-3">
               <h3 className="text-sm font-bold text-text-primary">Send Reminders across Projects</h3>
               <p className="text-xs text-text-secondary mt-0.5">
-                You selected items across {queueProjects.length} different projects. Review & send each project in sequence.
+                You selected items across {queueProjects.length} different projects. Open each project to review and send reminders:
               </p>
             </div>
 
             <div className="space-y-2">
-              {queueProjects.map((p, idx) => (
+              {queueProjects.map((p) => (
                 <div
                   key={p.projectId}
-                  className={`flex items-center justify-between rounded-xl border p-3 text-xs ${
-                    idx === currentQueueIndex
-                      ? 'border-accent bg-accent/5'
-                      : 'border-border bg-surface-alt/40'
-                  }`}
+                  className="flex items-center justify-between rounded-xl border border-border bg-surface-alt/40 p-3 text-xs"
                 >
                   <div>
                     <span className="font-bold text-text-primary">{p.projectName}</span>
@@ -1419,36 +1388,27 @@ export default function PendingPage() {
                       {p.itemIds.length} {p.itemIds.length === 1 ? 'item' : 'items'} selected
                     </p>
                   </div>
-                  {idx === currentQueueIndex ? (
-                    <span className="rounded bg-accent px-2 py-0.5 text-[10px] font-bold text-white">
-                      Current
-                    </span>
-                  ) : idx < currentQueueIndex ? (
-                    <span className="text-emerald-600 font-bold text-[11px]">✓ Processed</span>
-                  ) : (
-                    <span className="text-text-muted text-[11px]">Pending</span>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQueueProjects(null);
+                      router.push(`/projects/${p.projectId}/reminders`);
+                    }}
+                    className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors"
+                  >
+                    Send reminders →
+                  </button>
                 </div>
               ))}
             </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-border/60 pt-3">
+            <div className="flex items-center justify-end border-t border-border/60 pt-3">
               <button
                 type="button"
                 onClick={() => setQueueProjects(null)}
                 className="rounded-lg border border-border px-3.5 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-alt"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={sendingReminders}
-                onClick={() => processProjectReminders(queueProjects[currentQueueIndex])}
-                className="rounded-lg bg-accent px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-accent-hover transition-colors disabled:opacity-50"
-              >
-                {sendingReminders
-                  ? 'Preparing drafts…'
-                  : `Review & Send for ${queueProjects[currentQueueIndex].projectName} →`}
+                Close
               </button>
             </div>
           </div>
@@ -1592,7 +1552,7 @@ export default function PendingPage() {
               onClick={() => setViewingPhotoUrl(null)}
               className="absolute top-2 right-2 rounded-full bg-black/60 px-2.5 py-1 text-xs font-bold text-white hover:bg-black/90"
             >
-              ✕ Close
+              Close
             </button>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={viewingPhotoUrl} alt="Evidence" className="max-h-[85vh] w-auto object-contain" />

@@ -1203,7 +1203,7 @@ export default function AdminPage() {
                                         </span>
                                         {step.gate !== 'none' && (
                                           <span className="text-amber-700 font-medium">
-                                            (🔒 Gate: {step.gate})
+                                            (Gate: {step.gate})
                                           </span>
                                         )}
                                       </div>
@@ -1343,7 +1343,9 @@ export default function AdminPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
             <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 shadow-2xl">
               <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-success-light text-success font-bold text-lg">
-                ✓
+                <svg className="h-5 w-5 stroke-current stroke-[3]" fill="none" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
               </div>
               <h3 className="text-base font-bold text-center text-text-primary mb-1">
                 Account Created Successfully
@@ -1367,7 +1369,7 @@ export default function AdminPage() {
                   }}
                   className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors"
                 >
-                  {copied ? 'Copied ✓' : 'Copy'}
+                  {copied ? 'Copied' : 'Copy'}
                 </button>
               </div>
 

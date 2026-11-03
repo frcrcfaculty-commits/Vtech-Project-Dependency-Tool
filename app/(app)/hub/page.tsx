@@ -2,7 +2,7 @@
 
 // VTech Dashboard (v4). Project tiles on top; the selected project opens below with its filters, actions and a
 // matrix of every BOQ line (Product · Location · Agency involved · Quantity · Status). Status shows the line's
-// dependencies as ✓/✗ checkboxes in the sheet's colours: all green steps first, then one step at a time.
+// dependencies as checkboxes in the sheet's colours: all green steps first, then one step at a time.
 // Lock state comes only from the database view item_gate (see migration 0009).
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
@@ -25,7 +25,7 @@ interface ProjectTile {
 }
 interface Floor { id: string; label: string; sort: number }
 interface Room { id: string; floor_id: string; name: string; sort: number }
-interface Agency { id: string; company_name: string; agency_types: { name: string; internal: boolean } | null }
+interface Agency { id: string; company_name: string; agency_types: { name: string; internal: boolean; active?: boolean } | null }
 interface Line {
   id: string; room_id: string; product_id: string | null; boq_title: string | null; location: string | null; quantity: number;
   brand: string | null; make: string | null; model: string | null; product_catalogue: { title: string; scope: string } | null;
@@ -126,7 +126,7 @@ function Dashboard() {
     const [f, r, a, l, g, pr, ps] = await Promise.all([
       sb.from('floors').select('id, label, sort').eq('project_id', id).order('sort'),
       sb.from('rooms').select('id, floor_id, name, sort').eq('project_id', id).order('sort'),
-      sb.from('agencies').select('id, company_name, agency_types(name, internal)').eq('project_id', id),
+      sb.from('agencies').select('id, company_name, agency_types(name, internal, active)').eq('project_id', id),
       sb.from('room_products').select('id, room_id, product_id, boq_title, location, quantity, brand, make, model, product_catalogue(title, scope)').eq('project_id', id),
       sb.from('item_gate').select('*').eq('project_id', id).order('seq'),
       sb.from('project_progress').select('installation_pct, programming_pct').eq('project_id', id).maybeSingle(),
@@ -196,7 +196,9 @@ function Dashboard() {
     return m;
   }, [gate]);
   const agencyOptions: AgencyOption[] = useMemo(
-    () => agencies.map((a) => ({ id: a.id, label: `${a.agency_types?.name ?? 'Agency'} – ${a.company_name}`, internal: !!a.agency_types?.internal, typeName: a.agency_types?.name ?? '' }))
+    () => agencies
+      .filter((a) => a.agency_types?.active !== false)
+      .map((a) => ({ id: a.id, label: `${a.agency_types?.name ?? 'Agency'} – ${a.company_name}`, internal: !!a.agency_types?.internal, typeName: a.agency_types?.name ?? '' }))
       .sort((x, y) => x.label.localeCompare(y.label)),
     [agencies]
   );
@@ -333,16 +335,9 @@ function Dashboard() {
   }, [gate, lines, gateByLine]);
 
   // ── actions ──
-  async function sendReminders() {
+  function sendReminders() {
     if (!selectedId) return;
-    setBusy('remind'); setError(null);
-    try {
-      const res = await fetch(`/api/projects/${selectedId}/reminders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      if (!res.ok) throw new Error((await res.text()) || `Reminders failed (${res.status})`);
-      const data = await res.json();
-      if (data.visitId) router.push(`/projects/${selectedId}/visits/${data.visitId}/dispatches`);
-      else flash(data.warnings?.length ? data.warnings.join(' ') : 'Nothing to chase right now: no step is marked not done.');
-    } catch (e) { setError(e instanceof Error ? e.message : 'Reminders failed'); } finally { setBusy(null); }
+    router.push(`/projects/${selectedId}/reminders`);
   }
 
   async function setProjectStatus(status: ProjectStatus) {
@@ -493,8 +488,18 @@ function Dashboard() {
                   {STEP_COLOURS[c].legend}
                 </span>
               ))}
-              <span className="inline-flex items-center gap-1"><span className="font-bold text-success">✓</span> done</span>
-              <span className="inline-flex items-center gap-1"><span className="font-bold text-danger">✗</span> not done — tap to give the reason</span>
+              <span className="inline-flex items-center gap-1">
+                <svg className="h-3 w-3 stroke-success stroke-[3]" fill="none" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                done
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <svg className="h-3 w-3 stroke-danger stroke-[3]" fill="none" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                not done -- tap to give the reason
+              </span>
             </div>
 
             {/* matrix */}
