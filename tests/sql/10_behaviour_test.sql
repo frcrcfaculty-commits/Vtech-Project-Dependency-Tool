@@ -453,4 +453,24 @@ select pg_temp.assert((select count(*) from public.reminder_category_items) = 0,
 select pg_temp.assert((select count(*) from public.reminder_categories) = 6, 'v5: any user reads the categories');
 reset role;
 
+-- ── v6 (0011): contact follow-ups ──
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+set role authenticated;
+insert into public.contact_followups (project_id, agency_type_id, note)
+  select (select id from t_v5p), id, 'Carpenter not finalised' from public.agency_types where name = 'Carpenter';
+select pg_temp.assert((select remind_on from public.contact_followups where note = 'Carpenter not finalised') = (now() at time zone 'Asia/Kolkata')::date + 7, 'v6: follow-up due in 7 days');
+select pg_temp.assert((select count(*) from public.contact_followups_due where project_id = (select id from t_v5p)) = 0, 'v6: not due yet');
+update public.contact_followups set remind_on = remind_on - 7 where note = 'Carpenter not finalised';
+select pg_temp.assert((select group_name from public.contact_followups_due where project_id = (select id from t_v5p)) = 'Carpenter', 'v6: due after 7 days');
+insert into public.agencies (project_id, agency_type_id, company_name)
+  select (select id from t_v5p), id, 'WoodWorks' from public.agency_types where name = 'Carpenter';
+insert into public.agency_contacts (project_id, agency_id, name, email)
+  select project_id, id, 'Raju Carpenter', 'raju@wood.in' from public.agencies where company_name = 'WoodWorks' and project_id = (select id from t_v5p);
+select pg_temp.assert((select done_at is not null from public.contact_followups where note = 'Carpenter not finalised'), 'v6: adding the contact closes the follow-up');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
+set role authenticated;
+select pg_temp.assert((select count(*) from public.contact_followups) = 0, 'v6: outsider sees no follow-ups');
+reset role;
+
 \echo ALL SQL TESTS PASSED
