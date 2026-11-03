@@ -10,7 +10,9 @@ tab "Hansal". Download it as .xlsx (File → Download → Microsoft Excel), then
 
 Writes supabase/seed/products.csv and product_steps.csv. Colours (sheet legend, rows ~36-40):
 green D9EAD3 + blue C9DAF8 = other agencies (external); dark red E06666 = VTech Installers;
-light red F4CCCC = VTech Programmers; orange F9CB9C = VTech Project Managers. Green = phase 1; everything else = phase 2
+light red F4CCCC = VTech Programmers; orange F9CB9C = VTech Project Managers;
+magenta FF00FF = VTECH Sales Team (internal, PM follows up; Hansal 2026-11-03); purple 9900FF = Electrician (external).
+Catalogue changes to live data go in a migration (see 0009 §6, 0010); catalogue.sql only seeds a fresh database. Green = phase 1; everything else = phase 2
 (unlocks together once all greens of that product are Done/N.A.). Unknown colour → script stops so a human decides.
 """
 import csv, re, sys
@@ -18,11 +20,20 @@ from pathlib import Path
 import openpyxl
 
 COL = {'FFD9EAD3': ('external', 1), 'FFC9DAF8': ('external', 2), 'FFCFE2F3': ('external', 2),
-       'FFE06666': ('internal', 2), 'FFF4CCCC': ('internal', 2), 'FFF9CB9C': ('internal', 2)}
-INTERNAL_TYPE = {'FFE06666': 'VTech Installers', 'FFF4CCCC': 'VTech Programmers', 'FFF9CB9C': 'VTech Project Managers'}
+       'FFE06666': ('internal', 2), 'FFF4CCCC': ('internal', 2), 'FFF9CB9C': ('internal', 2),
+       'FFFF00FF': ('internal', 2), 'FF9900FF': ('external', 2)}
+INTERNAL_TYPE = {'FFE06666': 'VTech Installers', 'FFF4CCCC': 'VTech Programmers', 'FFF9CB9C': 'VTech Project Managers', 'FFFF00FF': 'VTECH Sales Team'}
 FIX = {'Fabric installtion': 'Fabric installation', 'Partial installtion done': 'Partial installation done',
        'Light Adddressing (Partial)': 'Light addressing (partial)', 'Light Adddressing ( complete )': 'Light addressing (complete)',
-       'Readiness by carpentar': 'Readiness by carpenter', 'Ferrul Sheet': 'Ferrule sheet', 'Special prog.': 'Special programming'}
+       'Readiness by carpentar': 'Readiness by carpenter', 'Ferrul Sheet': 'Ferrule sheet', 'Special prog.': 'Special programming',
+       # sheet rev. 2026-11-03 phrases steps as statuses; keep the stable short labels
+       'Fabric installation from curtain vendor awaited': 'Fabric installation', 'Client thumb impressions awaited': 'Client impressions',
+       'Ferrul Sheet awaited from electrician': 'Ferrule sheet', 'Partial installtion done from electrician': 'Partial installation done',
+       'Complete installation pending from electrician': 'Complete installation', 'Scene setting awaited from client': 'Scene setting',
+       'Internet activation from client': 'Internet activation', '50% installation': None,
+       'As built drawing - VTECH project Manager': 'As built drawing', 'Roomwise BOQ- VTECH Project manager': 'Roomwise BOQ',
+       'Operation manual - VTECH project manager': 'Operation manual', 'Special prog. - programmers': 'Special programming',
+       'AMC team intro - VTECH Project manager': 'AMC team intro'}
 EXTRA_LOC = {'Wifi Access point': ['Ceiling', 'Room', 'Hall', 'Entrance', 'External']}
 
 def ext_type(title, label):
@@ -52,7 +63,9 @@ def main(path):
         for c in range(4, 18):
             v = ws.cell(r, c).value
             if not v: continue
-            lab = re.sub(r'\s+', ' ', str(v)).strip(); lab = FIX.get(lab, lab); lab = lab[0].upper() + lab[1:]
+            lab = re.sub(r'\s+', ' ', str(v)).strip(); lab = FIX.get(lab, lab)
+            if lab is None: continue  # trigger notes (e.g. iPhone 50%), not steps
+            lab = lab[0].upper() + lab[1:]
             if lab.lower() in seen: continue
             f = ws.cell(r, c).fill.fgColor.rgb
             if f not in COL: sys.exit(f'Unknown colour {f} at {ws.cell(r, c).coordinate} ("{lab}"). Decide its owner, add it to COL.')

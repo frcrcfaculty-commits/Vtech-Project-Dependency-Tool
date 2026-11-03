@@ -33,10 +33,19 @@ Managers…) become `active = false`: hidden in every picker, kept in the DB for
 | Where | From | To |
 |---|---|---|
 | product_steps default + step_reasons | Architect, Painter, Curtain Vendor, AC Vendor | PMC / Architect / Client person |
-| product_steps default | Network Agency (internet activation) | Client |
 | product_steps default + step_reasons | VTech Project Managers (orange handover docs, "Yet not prepared by VTECH", "Sales clearance", "Stock purchase") | VTECH Sales Team |
 | step_reasons "Client approval awaited" | Client | Client (unchanged) |
-Existing `agencies`/`dependency_items` rows are **not** changed (old projects keep their data).
+Existing `agencies`/`dependency_items` rows are **not** changed by this remap (old projects keep their data) — except the 5 magenta steps below.
+
+**Catalogue colours from the "Hansal" tab (re-read 2026-11-03; Hansal decided: magenta = VTech Sales, everything goes to the PM).**
+Applied in the same migration 0010, **after** the remap above (same pattern as 0009 §6). Labels stay as they are (short) so existing items keep their names.
+| Sheet colour | Meaning | Steps (product · current label) | Change |
+|---|---|---|---|
+| magenta FF00FF | **VTECH Sales Team** (internal; the PM follows up) | Curtain · Fabric installation; Ekey scanner · Client impressions; Dimmer dali · Scene setting; Dimmer · Scene setting; Switch /Router · Internet activation | `default_agency_type_id` = VTECH Sales Team, `responsibility` = internal, `sheet_colour` = FF00FF; their existing `dependency_items` get `responsibility` = internal and `agency_id` = the project's VTECH Sales Team agency (null if none, so the default applies) |
+| purple 9900FF | Electrician (sheet text says "from electrician") | Off Termination · Ferrule sheet; Dimmer dali / Dimmer · Partial installation done, Complete installation | `sheet_colour` = 9900FF only (owner is already Electrician) |
+Gate unchanged: both colours are non-green, so they open one at a time in sheet order after the greens (0009 rule).
+Effect: those 5 steps leave "Waiting on client" and appear in internal reminders (All dependencies, to VTECH Sales). `scripts/extract-catalogue.py`
+now knows both colours (do not regenerate `supabase/seed/catalogue.sql` — it loads before 0009/0010 in `scripts/test-sql.sh`).
 
 ## 7. Reminder categories (sheet "Reminder Format")
 | Category (key) | Which pending items it lists | Recipient groups offered (checkboxes) |
@@ -101,7 +110,7 @@ and **Send Email · Send WhatsApp**. A category with 0 pending items shows "Noth
 2. Antigravity: U1, U2 (UI parts), U4 immediately; U3, U5, U6 after B1 is live and B2 is on `main`.
 3. Claude reviews each merge: all checks, live click-through at 1280px and 390px, live DB checks.
 
-## Not in scope (flag only)
-- "Hansal" tab now uses a new **magenta** colour (e.g. J5 "Fabric installation from curtain vendor awaited"); `scripts/extract-catalogue.py`
-  stops on it by design. Catalogue re-sync needs VTech to say who magenta means — separate task.
-- "Hansal Raju" tab (location/height and model/colour confirmations per product) — not requested yet.
+## Next project (not in v5): BOQ by the Lead PM
+Raju is VTech's **Lead PM** and creates the BOQ for every project (sheet tab "Hansal Raju": per product location/height confirmation and
+model/colour confirmation from client/architect, Make/Model, Qty). He **exports** the BOQ; the project PM then takes over a project with all
+products and dependencies already placed. Separate brief after v5 ships. v5 must not block it: keep `room_products` BOQ fields from 0009 untouched.
