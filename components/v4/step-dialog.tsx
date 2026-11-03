@@ -1,6 +1,6 @@
 'use client';
 
-// The popup behind every status checkbox on the v4 Dashboard. A step is either done (✓) or not done (✗).
+// The popup behind every status checkbox on the v4 Dashboard. A step is either done or not done.
 // Not done asks WHY, using the reasons from sheet tab "HansalV2" when the sheet has them for this step, otherwise
 // free text; the reason can point the step at the agency that is holding it up (done in set_item_status).
 
@@ -137,7 +137,7 @@ export function StepDialog({
           </button>
         </div>
 
-        {/* ✓ / ✗ */}
+        {/* status mode */}
         <div className="mt-4 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Status">
           <button
             type="button"
@@ -244,7 +244,7 @@ export function StepDialog({
                   <span className="w-20 shrink-0 tabular-nums">{e.status_date}</span>
                   <span>
                     <span className={e.status === 'complete' ? 'font-semibold text-success' : e.status === 'pending' ? 'font-semibold text-danger' : 'font-semibold'}>
-                      {e.status === 'complete' ? '✓ Done' : e.status === 'pending' ? '✗ Not done' : 'N.A.'}
+                      {e.status === 'complete' ? 'Done' : e.status === 'pending' ? 'Not done' : 'N.A.'}
                     </span>
                     {e.reason ? ` · ${e.reason}` : ''}{e.note ? ` · ${e.note}` : ''}
                   </span>
