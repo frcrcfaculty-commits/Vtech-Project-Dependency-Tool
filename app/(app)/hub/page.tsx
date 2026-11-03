@@ -7,6 +7,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
@@ -33,6 +34,16 @@ interface Line {
 }
 type StatusFilter = 'all' | 'open' | 'stuck' | 'done';
 
+interface DueFollowup {
+  id: string;
+  project_id: string;
+  project_name: string;
+  agency_type_id: string;
+  group_name: string;
+  note: string | null;
+  remind_on: string;
+}
+
 const STATUS_BADGE: Record<ProjectStatus, string> = { active: 'Active', on_hold: 'On hold', closed: 'Closed', finished: 'Finished' };
 
 export default function DashboardPage() {
@@ -54,6 +65,10 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Due contact follow-ups
+  const [dueFollowups, setDueFollowups] = useState<DueFollowup[]>([]);
+  const [showFollowupsList, setShowFollowupsList] = useState(false);
 
   const [floors, setFloors] = useState<Floor[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -80,11 +95,13 @@ function Dashboard() {
   const loadProjects = useCallback(async () => {
     setError(null);
     const sb = supabaseBrowser();
-    const [{ data: ps, error: pErr }, { data: its, error: iErr }] = await Promise.all([
+    const [{ data: ps, error: pErr }, { data: its, error: iErr }, { data: followups }] = await Promise.all([
       sb.from('projects').select('id, name, client_name, site_address, status').order('name'),
       sb.from('dependency_items').select('project_id, status'),
+      sb.from('contact_followups_due').select('id, project_id, project_name, agency_type_id, group_name, note, remind_on'),
     ]);
     if (pErr || iErr) { setError((pErr ?? iErr)!.message); setLoading(false); return; }
+    setDueFollowups((followups ?? []) as DueFollowup[]);
     const stats = new Map<string, { pending: number; done: number; total: number }>();
     for (const i of (its ?? []) as { project_id: string; status: string }[]) {
       const s = stats.get(i.project_id) ?? { pending: 0, done: 0, total: 0 };
@@ -102,6 +119,17 @@ function Dashboard() {
     setLoading(false);
     return tiles;
   }, []);
+
+  const snoozeFollowup = async (id: string) => {
+    const remindDate = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+    const sb = supabaseBrowser();
+    const { error: e } = await sb.from('contact_followups').update({ remind_on: remindDate }).eq('id', id);
+    if (!e) {
+      setDueFollowups((prev) => prev.filter((f) => f.id !== id));
+      flash('Reminder snoozed for 7 days.');
+      window.dispatchEvent(new Event(DASHBOARD_CHANGED));
+    }
+  };
 
   useEffect(() => {
     loadProjects().then((tiles) => {
@@ -375,6 +403,55 @@ function Dashboard() {
 
         {error && <div role="alert" className="mt-4 rounded-xl border border-danger/30 bg-danger-light px-4 py-3 text-sm text-danger">{error}</div>}
         {notice && <div role="status" className="mt-4 rounded-xl border border-success/30 bg-success-light px-4 py-3 text-sm text-success">{notice}</div>}
+
+        {dueFollowups.length > 0 && (
+          <div className="mt-4 rounded-xl border border-warning/40 bg-warning-light p-3 text-xs text-warning">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Glyph name="bell" className="h-4 w-4 shrink-0 text-warning" />
+                <span className="font-semibold text-warning">
+                  {dueFollowups.length} contact{dueFollowups.length === 1 ? '' : 's'} still to add
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFollowupsList(!showFollowupsList)}
+                className="text-xs font-semibold underline hover:opacity-80"
+              >
+                {showFollowupsList ? 'Hide list' : 'View list'}
+              </button>
+            </div>
+
+            {showFollowupsList && (
+              <ul className="mt-3 divide-y divide-warning/20 border-t border-warning/20 pt-1 space-y-2">
+                {dueFollowups.map((f) => (
+                  <li key={f.id} className="pt-2 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="font-bold text-text-primary">{f.project_name}</span>: add the{' '}
+                      <span className="font-semibold text-text-primary">{f.group_name}</span> contact
+                      {f.note && <span className="text-text-muted italic ml-1">({f.note})</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => snoozeFollowup(f.id)}
+                        className="rounded-lg border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors"
+                      >
+                        Remind me again in 7 days
+                      </button>
+                      <Link
+                        href={`/projects/${f.project_id}?tab=agencies`}
+                        className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-white hover:bg-accent-hover transition-colors"
+                      >
+                        Go to Agencies →
+                      </Link>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         <section aria-label="Projects" className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {visibleProjects.length === 0 && <p className="col-span-full rounded-2xl border border-border bg-surface p-6 text-sm text-text-secondary">No projects yet. Use “Projects → New project” to import a BOQ.</p>}

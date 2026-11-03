@@ -11,14 +11,16 @@ import { supabaseBrowser } from '@/lib/client/supabase';
 import { GlassIcon, Glyph } from '@/components/glass-icon';
 
 interface Notice {
-  id: string; // room_product id
-  kind: 'mismatch' | 'not_in_catalogue';
+  id: string; // room_product id or followup id
+  kind: 'mismatch' | 'not_in_catalogue' | 'contact_followup';
   projectId: string;
   projectName: string;
   title: string;
-  location: string | null;
-  usual: string[];
+  location?: string | null;
+  usual?: string[];
   where: string;
+  groupName?: string;
+  note?: string | null;
 }
 
 export const DASHBOARD_CHANGED = 'vtech:dashboard-changed';
@@ -31,41 +33,75 @@ export function NotificationsBell() {
 
   const load = useCallback(async () => {
     const sb = supabaseBrowser();
-    const { data: checks } = await sb
-      .from('location_checks')
-      .select('room_product_id, project_id, location, title, location_options, location_validated_at, check_result')
-      .in('check_result', ['mismatch', 'not_in_catalogue']);
-    const rows = (checks ?? []) as { room_product_id: string; project_id: string; location: string | null; title: string | null; location_options: string[] | null; location_validated_at: string | null; check_result: string }[];
-    if (!rows.length) { setItems([]); return; }
-    const ids = rows.map((r) => r.room_product_id);
-    const [{ data: rps }, { data: projects }, { data: withSteps }] = await Promise.all([
-      sb.from('room_products').select('id, boq_title, rooms(name, floors(label))').in('id', ids),
-      sb.from('projects').select('id, name, status').in('id', [...new Set(rows.map((r) => r.project_id))]),
-      sb.from('dependency_items').select('room_product_id').in('room_product_id', ids),
+    const [{ data: checks }, { data: dueFollowups }] = await Promise.all([
+      sb
+        .from('location_checks')
+        .select('room_product_id, project_id, location, title, location_options, location_validated_at, check_result')
+        .in('check_result', ['mismatch', 'not_in_catalogue']),
+      sb
+        .from('contact_followups_due')
+        .select('id, project_id, project_name, agency_type_id, group_name, note, remind_on'),
     ]);
-    const hasSteps = new Set((withSteps ?? []).map((x: { room_product_id: string }) => x.room_product_id));
-    type RpRow = { id: string; boq_title: string | null; rooms: { name: string; floors: { label: string } | null } | null };
-    const open = new Map<string, string>((projects ?? []).filter((p: { status: string }) => p.status === 'active' || p.status === 'on_hold').map((p: { id: string; name: string }) => [p.id, p.name]));
-    const rp = new Map<string, RpRow>(((rps ?? []) as unknown as RpRow[]).map((r) => [r.id, r]));
+
     const list: Notice[] = [];
-    for (const r of rows) {
-      if (!open.has(r.project_id)) continue;
-      if (r.check_result === 'mismatch' && r.location_validated_at) continue;
-      if (r.check_result === 'not_in_catalogue' && hasSteps.has(r.room_product_id)) continue;
-      const x = rp.get(r.room_product_id);
+
+    // Due contact follow-ups
+    for (const f of ((dueFollowups ?? []) as Array<{ id: string; project_id: string; project_name: string; group_name: string; note: string | null }>)) {
       list.push({
-        id: r.room_product_id,
-        kind: r.check_result as Notice['kind'],
-        projectId: r.project_id,
-        projectName: open.get(r.project_id)!,
-        title: r.title ?? x?.boq_title ?? 'Product',
-        location: r.location,
-        usual: r.location_options ?? [],
-        where: x?.rooms ? `${x.rooms.floors?.label ?? ''} · ${x.rooms.name}` : '',
+        id: f.id,
+        kind: 'contact_followup',
+        projectId: f.project_id,
+        projectName: f.project_name,
+        title: `${f.project_name}: add the ${f.group_name} contact`,
+        groupName: f.group_name,
+        note: f.note,
+        where: 'Agencies tab',
       });
     }
+
+    const rows = (checks ?? []) as { room_product_id: string; project_id: string; location: string | null; title: string | null; location_options: string[] | null; location_validated_at: string | null; check_result: string }[];
+    if (rows.length > 0) {
+      const ids = rows.map((r) => r.room_product_id);
+      const [{ data: rps }, { data: projects }, { data: withSteps }] = await Promise.all([
+        sb.from('room_products').select('id, boq_title, rooms(name, floors(label))').in('id', ids),
+        sb.from('projects').select('id, name, status').in('id', [...new Set(rows.map((r) => r.project_id))]),
+        sb.from('dependency_items').select('room_product_id').in('room_product_id', ids),
+      ]);
+      const hasSteps = new Set((withSteps ?? []).map((x: { room_product_id: string }) => x.room_product_id));
+      type RpRow = { id: string; boq_title: string | null; rooms: { name: string; floors: { label: string } | null } | null };
+      const open = new Map<string, string>((projects ?? []).filter((p: { status: string }) => p.status === 'active' || p.status === 'on_hold').map((p: { id: string; name: string }) => [p.id, p.name]));
+      const rp = new Map<string, RpRow>(((rps ?? []) as unknown as RpRow[]).map((r) => [r.id, r]));
+
+      for (const r of rows) {
+        if (!open.has(r.project_id)) continue;
+        if (r.check_result === 'mismatch' && r.location_validated_at) continue;
+        if (r.check_result === 'not_in_catalogue' && hasSteps.has(r.room_product_id)) continue;
+        const x = rp.get(r.room_product_id);
+        list.push({
+          id: r.room_product_id,
+          kind: r.check_result as Notice['kind'],
+          projectId: r.project_id,
+          projectName: open.get(r.project_id)!,
+          title: r.title ?? x?.boq_title ?? 'Product',
+          location: r.location,
+          usual: r.location_options ?? [],
+          where: x?.rooms ? `${x.rooms.floors?.label ?? ''} · ${x.rooms.name}` : '',
+        });
+      }
+    }
+
     setItems(list);
   }, []);
+
+  async function snoozeFollowup(id: string) {
+    setBusy(id);
+    const sb = supabaseBrowser();
+    const remindDate = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+    await sb.from('contact_followups').update({ remind_on: remindDate }).eq('id', id);
+    setBusy(null);
+    await load();
+    window.dispatchEvent(new Event(DASHBOARD_CHANGED));
+  }
 
   useEffect(() => {
     load();
@@ -116,25 +152,54 @@ export function NotificationsBell() {
               {items.map((n) => (
                 <li key={n.id} className="rounded-xl border border-border p-3 text-sm">
                   <div className="flex items-start gap-2">
-                    <span className={n.kind === 'mismatch' ? 'text-warning' : 'text-danger'}><Glyph name="alert" /></span>
-                    <div className="min-w-0">
-                      <p className="font-medium">{n.title} <span className="font-normal text-text-secondary">· {n.projectName}</span></p>
-                      <p className="text-xs text-text-secondary">{n.where}</p>
-                      {n.kind === 'mismatch' ? (
-                        <p className="mt-1 text-xs">BOQ location <strong>“{n.location}”</strong> is not a usual one ({n.usual.join(', ')}). Please confirm it.</p>
+                    <span className={n.kind === 'contact_followup' ? 'text-accent' : n.kind === 'mismatch' ? 'text-warning' : 'text-danger'}>
+                      <Glyph name={n.kind === 'contact_followup' ? 'bell' : 'alert'} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {n.kind === 'contact_followup' ? (
+                        <>
+                          <p className="font-medium text-text-primary">{n.title}</p>
+                          <p className="text-xs text-text-secondary">{n.where}</p>
+                          {n.note && <p className="mt-1 text-xs text-text-secondary italic">“{n.note}”</p>}
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <Link
+                              href={`/projects/${n.projectId}?tab=agencies`}
+                              onClick={() => setOpen(false)}
+                              className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-white hover:bg-accent-hover transition-colors"
+                            >
+                              Go to Agencies →
+                            </Link>
+                            <button
+                              type="button"
+                              disabled={busy === n.id}
+                              onClick={() => snoozeFollowup(n.id)}
+                              className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-surface-alt transition-colors disabled:opacity-50"
+                            >
+                              Remind me again in 7 days
+                            </button>
+                          </div>
+                        </>
                       ) : (
-                        <p className="mt-1 text-xs">Not in VTech’s product list — add its dependencies by hand.</p>
+                        <>
+                          <p className="font-medium">{n.title} <span className="font-normal text-text-secondary">· {n.projectName}</span></p>
+                          <p className="text-xs text-text-secondary">{n.where}</p>
+                          {n.kind === 'mismatch' ? (
+                            <p className="mt-1 text-xs">BOQ location <strong>“{n.location}”</strong> is not a usual one ({n.usual?.join(', ')}). Please confirm it.</p>
+                          ) : (
+                            <p className="mt-1 text-xs">Not in VTech’s product list — add its dependencies by hand.</p>
+                          )}
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {n.kind === 'mismatch' ? (
+                              <>
+                                <button type="button" disabled={busy === n.id} onClick={() => confirmLocation(n.id)} className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50">Location is right</button>
+                                <Link href={`/hub?p=${n.projectId}&edit=1`} onClick={() => setOpen(false)} className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium">Change it</Link>
+                              </>
+                            ) : (
+                              <Link href={`/hub?p=${n.projectId}&steps=${n.id}`} onClick={() => setOpen(false)} className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-white">Add dependencies</Link>
+                            )}
+                          </div>
+                        </>
                       )}
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {n.kind === 'mismatch' ? (
-                          <>
-                            <button type="button" disabled={busy === n.id} onClick={() => confirmLocation(n.id)} className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50">Location is right</button>
-                            <Link href={`/hub?p=${n.projectId}&edit=1`} onClick={() => setOpen(false)} className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium">Change it</Link>
-                          </>
-                        ) : (
-                          <Link href={`/hub?p=${n.projectId}&steps=${n.id}`} onClick={() => setOpen(false)} className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-white">Add dependencies</Link>
-                        )}
-                      </div>
                     </div>
                   </div>
                 </li>
