@@ -16,7 +16,8 @@ import { StepDialog, type AgencyOption } from '@/components/v4/step-dialog';
 import { EditProjectDialog } from '@/components/v4/edit-project-dialog';
 import { CustomStepsDialog } from '@/components/v4/custom-steps-dialog';
 import { DASHBOARD_CHANGED } from '@/components/v4/notifications-bell';
-import { LEGEND_ORDER, STEP_COLOURS, isDone, lineStatus, stepColour, triggerText, type GateRow } from '@/lib/client/steps';
+import { GroupingToggle, type SortBy } from '@/components/v6/grouping-toggle';
+import { LEGEND_ORDER, STEP_COLOURS, isDone, lineStatus, stepColour, type GateRow } from '@/lib/client/steps';
 
 type ProjectStatus = 'active' | 'on_hold' | 'closed' | 'finished';
 interface ProjectTile {
@@ -30,7 +31,6 @@ interface Line {
   id: string; room_id: string; product_id: string | null; boq_title: string | null; location: string | null; quantity: number;
   brand: string | null; make: string | null; model: string | null; product_catalogue: { title: string; scope: string } | null;
 }
-type SortBy = 'room' | 'agency' | 'product';
 type StatusFilter = 'all' | 'open' | 'stuck' | 'done';
 
 const STATUS_BADGE: Record<ProjectStatus, string> = { active: 'Active', on_hold: 'On hold', closed: 'Closed', finished: 'Finished' };
@@ -389,16 +389,13 @@ function Dashboard() {
                 aria-pressed={active}
                 className={`group rounded-2xl border bg-surface p-4 text-left transition hover:-translate-y-0.5 ${active ? 'border-accent ring-2 ring-accent/25' : 'border-border'}`}
               >
-                <div className="flex items-start gap-3">
-                  <GlassIcon name="building" size={34} tint={p.status === 'active' ? 'brand' : p.status === 'finished' ? 'green' : 'slate'} />
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-base font-semibold">{p.name}</h3>
-                    <p className="truncate text-xs text-text-secondary">{p.client_name ?? 'No client name'}</p>
-                  </div>
-                  {p.status !== 'active' && <span className="rounded-md bg-surface-alt px-1.5 py-0.5 text-[10px] font-semibold uppercase text-text-secondary">{STATUS_BADGE[p.status]}</span>}
+                <h3 className="truncate text-base font-semibold text-text-primary">{p.name}</h3>
+                <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-alt">
+                  <div className="h-full rounded-full bg-accent transition-all duration-300" style={{ width: `${pct}%` }} />
                 </div>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-alt"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
-                <p className="mt-1.5 text-xs text-text-secondary"><span className="font-semibold text-text-primary">{pct}%</span> done · {p.pending} not done</p>
+                <p className="mt-2 text-xs text-text-secondary">
+                  <span className="font-semibold text-text-primary">{pct}%</span> · {p.pending} pending
+                </p>
               </button>
             );
           })}
@@ -454,16 +451,9 @@ function Dashboard() {
               </div>
             )}
 
-            {/* filters (same as before) + sort */}
+            {/* filters + sort */}
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-              <div role="radiogroup" aria-label="Sort" className="inline-flex w-full rounded-xl border border-border bg-surface-alt p-1 sm:w-auto">
-                {([['room', 'Room-wise', 'rooms'], ['agency', 'Agency-wise', 'agencies'], ['product', 'Product-wise', 'products']] as const).map(([k, label, icon]) => (
-                  <button key={k} type="button" role="radio" aria-checked={sortBy === k} onClick={() => setSortBy(k)}
-                    className={`inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 font-medium transition sm:flex-none sm:px-3 ${sortBy === k ? 'bg-surface text-accent shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}>
-                    <Glyph name={icon} /> {label}
-                  </button>
-                ))}
-              </div>
+              <GroupingToggle value={sortBy} onChange={setSortBy} />
               <select aria-label="Status filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="w-full rounded-xl border border-border px-3 py-2 sm:w-auto">
                 <option value="all">All lines ({lines.length})</option>
                 <option value="open">Open lines</option>
@@ -475,9 +465,6 @@ function Dashboard() {
                 {agencyOptions.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
               </select>
               <input aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search product, room, model…" className="w-full min-w-0 rounded-xl border border-border px-3 py-2 sm:w-auto sm:flex-1 sm:max-w-xs" />
-              <label className="inline-flex items-center gap-2 text-text-secondary">
-                <input type="checkbox" checked={showAllSteps} onChange={(e) => setShowAllSteps(e.target.checked)} /> Show all steps
-              </label>
             </div>
 
             {/* colour key */}
@@ -488,17 +475,17 @@ function Dashboard() {
                   {STEP_COLOURS[c].legend}
                 </span>
               ))}
-              <span className="inline-flex items-center gap-1">
-                <svg className="h-3 w-3 stroke-success stroke-[3]" fill="none" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-                done
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-4 rounded-xs border border-text-muted bg-text-muted" />
+                filled = done
               </span>
-              <span className="inline-flex items-center gap-1">
-                <svg className="h-3 w-3 stroke-danger stroke-[3]" fill="none" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                not done -- tap to give the reason
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-4 rounded-xs border border-text-muted bg-transparent" />
+                outlined = open
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-4 rounded-xs border-2 border-text-primary bg-surface" />
+                dark outline = stuck
               </span>
             </div>
 
@@ -519,11 +506,19 @@ function Dashboard() {
                     <span className="text-xs font-normal text-text-muted">({g.rows.length})</span>
                   </h3>
                   <ul className="mt-2 divide-y divide-border overflow-hidden rounded-xl border border-border">
-                    {g.rows.map(({ line, gate: lg, st, shownSteps, involved }) => {
+                    {g.rows.map(({ line, gate: lg, involved }) => {
                       const needsSteps = !line.product_id && lg.length === 0;
                       const spec = [line.brand, line.make, line.model].filter(Boolean).join(' · ');
+                      const defaultStep = lg.find((r) => r.status === 'pending' && !r.locked)
+                        ?? lg.find((r) => !isDone(r.status) && !r.locked)
+                        ?? lg[0];
                       return (
-                        <li key={line.id} data-line={line.id} className="grid grid-cols-1 gap-3 bg-surface px-4 py-3.5 transition-colors hover:bg-surface-alt/40 md:grid-cols-[minmax(200px,1.5fr)_minmax(120px,0.9fr)_56px_minmax(280px,2.6fr)] md:items-center md:gap-4">
+                        <li
+                          key={line.id}
+                          data-line={line.id}
+                          onClick={() => { if (!needsSteps && defaultStep) setStepRow(defaultStep); }}
+                          className={`grid grid-cols-1 gap-3 bg-surface px-4 py-3 transition-colors hover:bg-surface-alt/40 md:grid-cols-[minmax(200px,1.5fr)_minmax(120px,0.9fr)_56px_minmax(280px,2.6fr)] md:items-center md:gap-4 ${!needsSteps && defaultStep ? 'cursor-pointer' : ''}`}
+                        >
                           <div className="min-w-0">
                             <p className="font-semibold">{titleOf(line)}{!line.product_id && <span className="ml-1.5 rounded bg-warning-light px-1 text-[10px] font-semibold uppercase text-warning">not in list</span>}</p>
                             {spec && <p className="truncate text-xs text-text-muted">{spec}</p>}
@@ -541,16 +536,12 @@ function Dashboard() {
                           <div className="text-sm tabular-nums md:text-right"><span className="md:hidden text-xs text-text-muted">Qty: </span>{line.quantity}</div>
                           <div className="min-w-0">
                             {needsSteps ? (
-                              <button type="button" onClick={() => setCustomFor(line)} className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white">
+                              <button type="button" onClick={(e) => { e.stopPropagation(); setCustomFor(line); }} className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white">
                                 <Glyph name="plus" /> Add dependencies
                               </button>
                             ) : (
-                              <StatusCell
+                              <SegmentedColorBar
                                 steps={lg}
-                                st={st}
-                                shown={shownSteps}
-                                showAll={showAllSteps}
-                                waitingText={st.waitingTrigger ? triggerText(lg[0]?.catalogue_title ?? null, progress) : null}
                                 onOpen={(r) => setStepRow(r)}
                               />
                             )}
@@ -597,77 +588,52 @@ function Dashboard() {
   );
 }
 
-/** Status: a slim progress track (one segment per step, in sheet colours) and the step(s) to act on now. */
-function StatusCell({ steps, st, shown, showAll, waitingText, onOpen }: {
-  steps: GateRow[]; st: ReturnType<typeof lineStatus>; shown: GateRow[]; showAll: boolean; waitingText: string | null; onOpen: (r: GateRow) => void;
-}) {
+/** Segmented colour bar: one segment per step, coloured by sheet_colour; filled = done/N.A., outlined = open, faded = locked; the current stuck step has a 2px dark outline. */
+function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: GateRow) => void }) {
   const ordered = [...steps].sort((a, b) => a.seq - b.seq);
-  const current = new Set(st.visible.map((r) => r.item_id));
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <div className="flex flex-1 gap-[3px]" aria-hidden>
-          {ordered.map((r) => {
-            const c = stepColour(r.sheet_colour);
-            const done = isDone(r.status);
-            const now = current.has(r.item_id) && !done;
-            return (
-              <span
-                key={r.item_id}
-                title={`${r.label}: ${done ? 'done' : now ? 'not done' : 'later'}`}
-                className="h-1.5 min-w-[6px] flex-1 rounded-full"
-                style={{
-                  background: done ? c.ring : now ? c.bg : 'rgba(132,124,163,0.18)',
-                  boxShadow: now ? `0 0 0 1.5px ${c.ring}` : undefined,
-                }}
-              />
-            );
-          })}
-        </div>
-        <span className="shrink-0 text-[11px] font-semibold tabular-nums text-text-secondary">{st.done}/{st.total}</span>
-      </div>
-      {waitingText && !showAll ? (
-        <p className="inline-flex items-center gap-1.5 rounded-full bg-surface-alt px-3 py-1 text-xs text-text-secondary"><Glyph name="clock" className="h-3.5 w-3.5" /> {waitingText}</p>
-      ) : st.allDone && !showAll ? (
-        <p className="inline-flex items-center gap-1.5 rounded-full bg-success-light px-3 py-1 text-xs font-semibold text-success"><Glyph name="check" className="h-3.5 w-3.5" /> All {st.total} steps done</p>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {shown.map((r) => <StepPill key={r.item_id} row={r} onClick={() => onOpen(r)} />)}
-        </div>
-      )}
-    </div>
-  );
-}
+  if (ordered.length === 0) return null;
 
-function StepPill({ row, onClick }: { row: GateRow; onClick: () => void }) {
-  const c = stepColour(row.sheet_colour);
-  const done = isDone(row.status);
-  const locked = row.locked && !done;
-  const tip = done ? `${row.label}: done` : locked ? `${row.label}: opens later` : `${row.label}: not done${row.stuck_reason ? ` — ${row.stuck_reason}` : ''}`;
+  const doneCount = ordered.filter((r) => isDone(r.status)).length;
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={locked}
-      title={tip}
-      aria-label={tip}
-      className={`group inline-flex max-w-full items-center gap-2 rounded-full border bg-white/85 py-1 pl-1 pr-3 text-left text-xs shadow-[0_1px_2px_rgba(25,17,58,0.06)] transition hover:-translate-y-px hover:shadow-[0_4px_12px_-4px_rgba(74,23,208,0.35)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 ${
-        done ? 'border-success/30' : locked ? 'border-border' : 'border-danger/25'
-      }`}
-    >
-      <span
-        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
-          done ? 'bg-success text-white' : locked ? 'bg-surface-alt text-text-muted' : 'bg-white text-danger ring-[1.5px] ring-danger/70'
-        }`}
-      >
-        <Glyph name={done ? 'check' : locked ? 'lock' : 'cross'} className="h-3 w-3" />
+    <div className="flex items-center gap-2">
+      <div className="flex h-5 flex-1 items-center gap-1 min-w-[120px] max-w-xs" aria-label="Step progress">
+        {ordered.map((r) => {
+          const c = stepColour(r.sheet_colour);
+          const done = isDone(r.status);
+          const locked = r.locked && !done;
+          const isStuck = r.status === 'pending';
+
+          const tip = `${r.label}${done ? ' (done)' : isStuck ? ` (stuck: ${r.stuck_reason || 'not done'})` : locked ? ' (locked)' : ' (open)'}`;
+
+          return (
+            <button
+              key={r.item_id}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpen(r);
+              }}
+              title={tip}
+              aria-label={tip}
+              className={`h-4 min-w-[12px] flex-1 rounded-xs transition hover:scale-y-110 active:scale-95 ${
+                locked ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'
+              }`}
+              style={{
+                backgroundColor: done || isStuck ? c.bg : locked ? c.bg : 'transparent',
+                borderColor: isStuck ? '#0f172a' : done ? c.ring : locked ? 'transparent' : c.ring,
+                borderWidth: isStuck ? '2px' : done ? '1px' : locked ? '0px' : '2px',
+                borderStyle: 'solid',
+                boxShadow: isStuck ? '0 0 0 1px #0f172a' : undefined,
+              }}
+            />
+          );
+        })}
+      </div>
+      <span className="shrink-0 text-[11px] font-semibold tabular-nums text-text-muted">
+        {doneCount}/{ordered.length}
       </span>
-      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c.bg, boxShadow: `0 0 0 1px ${c.ring}` }} />
-      <span className="min-w-0">
-        <span className={`block truncate font-medium ${done ? 'text-text-secondary line-through decoration-text-muted/50' : 'text-text-primary'}`}>{row.label}</span>
-        {!done && row.stuck_reason && <span className="block truncate text-[11px] text-danger/80">{row.stuck_reason}</span>}
-      </span>
-    </button>
+    </div>
   );
 }
 
