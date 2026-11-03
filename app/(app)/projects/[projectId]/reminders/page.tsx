@@ -34,19 +34,24 @@ interface ReminderCategory {
   recipients: RecipientGroup[];
 }
 
+interface Person { name: string; email?: string; phone?: string }
+const personLabel = (p: Person) => `${p.name}${p.email ? ` <${p.email}>` : p.phone ? ` (${p.phone})` : ''}`;
+
 interface PreviewResult {
   email: {
-    to: string[];
-    cc: string[];
+    to: Person[];
+    cc: Person[];
     subject: string;
     text: string;
     html: string;
   } | null;
   whatsapp: {
-    to: string[];
+    to: Person[];
     text: string;
   } | null;
   itemCount: number;
+  drafts?: { agency: string; email: PreviewResult['email']; whatsapp: PreviewResult['whatsapp'] }[];
+  warnings?: string[];
 }
 
 interface DispatchResult {
@@ -94,7 +99,7 @@ export default function ProjectRemindersPage({
 
   // Confirmation dialog for link-mode WhatsApp dispatches
   const [confirmDialog, setConfirmDialog] = useState<{
-    dispatchId: string;
+    dispatchIds: string[];
     links: { label: string; url: string }[];
   } | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -300,25 +305,8 @@ export default function ProjectRemindersPage({
           const data: PreviewResult = await res.json();
           setPreviewData(data);
         } else {
-          // If endpoint not ready, build clean mock preview from live category items
-          setPreviewData({
-            email: {
-              to: focusedCategory.recipients
-                .filter((r) => currentRecipients.includes(r.agencyTypeId))
-                .flatMap((r) => r.agencies.flatMap((a) => a.contacts.map((c) => c.email).filter(Boolean) as string[])),
-              cc: [],
-              subject: `Pending Dependencies -- ${projectName} (${focusedCategory.label})`,
-              text: `Dear Team,\n\nFollowing up on pending dependencies for ${projectName}.\nCategory: ${focusedCategory.label} (${focusedCategory.itemCount} pending item${focusedCategory.itemCount === 1 ? '' : 's'}).\n\nPlease find the checklist details and kindly update once work is ready on site.\n\nThank you,\nVTech Project Team`,
-              html: `<div style="font-family:sans-serif;padding:16px;"><p>Dear Team,</p><p>Following up on pending dependencies for <strong>${projectName}</strong>.</p><p><strong>Category:</strong> ${focusedCategory.label} (${focusedCategory.itemCount} pending item${focusedCategory.itemCount === 1 ? '' : 's'}).</p><p>Please find the checklist details and kindly update once work is ready on site.</p><p>Thank you,<br/>VTech Project Team</p></div>`,
-            },
-            whatsapp: {
-              to: focusedCategory.recipients
-                .filter((r) => currentRecipients.includes(r.agencyTypeId))
-                .flatMap((r) => r.agencies.flatMap((a) => a.contacts.map((c) => c.phone).filter(Boolean) as string[])),
-              text: `*VTech Project Tracker -- ${projectName}*\n\nCategory: *${focusedCategory.label}*\nPending: ${focusedCategory.itemCount} item${focusedCategory.itemCount === 1 ? '' : 's'}\n\nDear Team,\nPlease check and resolve the pending site dependencies at the earliest.\n\nThank you,\nVTech Support`,
-            },
-            itemCount: focusedCategory.itemCount,
-          });
+          const msg = await res.json().then((j: { error?: string }) => j.error).catch(() => null);
+          setPreviewData({ email: null, whatsapp: null, itemCount: focusedCategory.itemCount, warnings: [msg ?? `Preview failed (${res.status})`] });
         }
       } catch {
         // Fallback preview
@@ -388,7 +376,7 @@ export default function ProjectRemindersPage({
         if (links && Array.isArray(links)) {
           allLinks.push(...links);
         }
-        if (d.channel === 'whatsapp' && d.id) {
+        if (d.id && (d.outcome?.status ?? 'needs_confirmation') === 'needs_confirmation') {
           waDispatchIds.push(d.id);
         }
       });
@@ -411,9 +399,9 @@ export default function ProjectRemindersPage({
       }
 
       // If WhatsApp dispatches were created, show "I've sent it" confirmation dialog
-      if (channel === 'whatsapp' && waDispatchIds.length > 0) {
+      if (waDispatchIds.length > 0) {
         setConfirmDialog({
-          dispatchId: waDispatchIds[0],
+          dispatchIds: waDispatchIds,
           links: allLinks,
         });
       }
@@ -428,14 +416,12 @@ export default function ProjectRemindersPage({
   };
 
   // Confirm manual link send
-  const handleConfirmSend = async (dispatchId: string) => {
+  const handleConfirmSend = async (dispatchIds: string[]) => {
     setConfirming(true);
     try {
-      const res = await fetch(`/api/dispatches/${dispatchId}/confirm`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        throw new Error(`Confirmation failed (${res.status})`);
+      for (const id of dispatchIds) {
+        const res = await fetch(`/api/dispatches/${id}/confirm`, { method: 'POST' });
+        if (!res.ok) throw new Error(`Confirmation failed (${res.status})`);
       }
       setConfirmDialog(null);
       showToast('Dispatch marked as sent.');
@@ -530,7 +516,9 @@ export default function ProjectRemindersPage({
                     const isFocused = focusedCategoryKey === cat.key;
                     const chipStyle = CATEGORY_CHIP_COLORS[cat.key] ?? CATEGORY_CHIP_COLORS.all;
                     const catSelectedRecipients = selectedRecipients[cat.key] ?? new Set();
-                    const hasPending = cat.itemCount > 0;
+                    // Sendable only with pending items and at least one ticked group that exists in this project.
+                    const hasPending = cat.itemCount > 0 &&
+                      cat.recipients.some((r) => r.agencies.length > 0 && catSelectedRecipients.has(r.agencyTypeId));
                     const isSendingThisCat = sendingState?.key === cat.key;
 
                     return (
@@ -615,7 +603,7 @@ export default function ProjectRemindersPage({
                         {/* Action Buttons: Send WhatsApp · Send Email */}
                         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/50">
                           <span className="text-xs text-text-muted">
-                            {isFocused ? 'Previewing on right panel' : 'Click row to preview draft'}
+                            {isFocused ? 'Previewing' : 'Click row to preview draft'}
                           </span>
 
                           <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
@@ -709,7 +697,7 @@ export default function ProjectRemindersPage({
                       <div>
                         <span className="font-semibold text-text-secondary">To: </span>
                         <span className="text-text-primary">
-                          {previewData?.email?.to?.length ? previewData.email.to.join(', ') : 'No recipient email'}
+                          {previewData?.drafts?.some((d) => d.email) ? previewData.drafts.flatMap((d) => d.email?.to ?? []).map(personLabel).join(', ') : previewData?.warnings?.join(' ') || 'No recipient email'}
                         </span>
                       </div>
                       <div>
@@ -741,9 +729,9 @@ export default function ProjectRemindersPage({
                     <div className="rounded-lg bg-surface-alt p-2.5 border border-border">
                       <span className="font-semibold text-text-secondary">Recipients: </span>
                       <span className="text-text-primary">
-                        {previewData?.whatsapp?.to?.length
-                          ? previewData.whatsapp.to.join(', ')
-                          : 'No phone numbers on selected agencies'}
+                        {previewData?.drafts?.some((d) => d.whatsapp)
+                          ? previewData.drafts.flatMap((d) => d.whatsapp?.to ?? []).map(personLabel).join(', ')
+                          : previewData?.warnings?.join(' ') || 'No phone numbers on selected agencies'}
                       </span>
                     </div>
 
@@ -798,7 +786,7 @@ export default function ProjectRemindersPage({
                 <button
                   type="button"
                   disabled={confirming}
-                  onClick={() => handleConfirmSend(confirmDialog.dispatchId)}
+                  onClick={() => handleConfirmSend(confirmDialog.dispatchIds)}
                   className="rounded-lg bg-success px-4 py-2 text-xs font-bold text-white shadow-sm hover:opacity-90 transition-opacity"
                 >
                   {confirming ? 'Saving…' : "I Have Sent It"}
