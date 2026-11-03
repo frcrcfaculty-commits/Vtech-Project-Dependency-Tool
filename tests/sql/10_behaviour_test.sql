@@ -280,7 +280,7 @@ reset role;
 -- ── 0007 product tracking ──
 select pg_temp.assert((select count(*) from public.product_catalogue) = 27, '27 products from the Hansal sheet');
 select pg_temp.assert((select count(*) from public.product_steps) = 163, '163 product steps');
-select pg_temp.assert((select count(*) from public.agency_types where internal) = 4, '4 internal agency types');
+select pg_temp.assert((select count(*) from public.agency_types where internal) = 5, '5 internal agency types (incl. VTECH Sales Team, 0010)');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 set role authenticated;
 create temp table t_sp as select id from public.product_catalogue where title = 'Speakers';
@@ -409,6 +409,48 @@ update public.profiles set active = false where id = '00000000-0000-0000-0000-00
 select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 set role authenticated;
 select pg_temp.assert(not public.can_delete_projects(), 'deactivated listed account loses the right');
+reset role;
+
+-- ── v5 (0010): HansalV2 agency groups, magenta/purple colours, reminder categories ──
+reset role;
+select pg_temp.assert((select count(*) from public.agency_types where active) = 7, 'v5: exactly 7 active agency groups');
+select pg_temp.assert((select string_agg(name || ':' || coalesce(contact_slots::text, '+'), ',' order by sort) from public.agency_types where active)
+  = 'Client:3,PMC / Architect / Client person:6,Electrician:2,Carpenter:2,VTECH Sales Team:+,VTech Installers:+,VTech Programmers:+', 'v5: groups in order with contact slots');
+select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where not t.active) = 0, 'v5: no step defaults to a retired type');
+select pg_temp.assert((select count(*) from public.step_reasons r left join public.agency_types t on lower(t.name) = lower(r.agency_type) where r.agency_type is not null and not coalesce(t.active, false)) = 0, 'v5: every stuck reason points to an active group');
+select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where s.sheet_colour = 'FF00FF' and t.name = 'VTECH Sales Team' and s.responsibility = 'internal') = 5, 'v5: 5 magenta steps belong to VTECH Sales Team');
+select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where s.sheet_colour = '9900FF' and t.name = 'Electrician') = 5, 'v5: 5 purple steps belong to the electrician');
+select pg_temp.assert((select count(*) from public.reminder_categories) = 6, 'v5: 6 reminder categories (Reminder Format tab + sales)');
+select pg_temp.assert((select string_agg(c.key || ':' || t.name || ':' || r.default_checked, ',' order by c.sort, r.sort) from public.reminder_category_recipients r join public.reminder_categories c on c.key = r.category_key join public.agency_types t on t.id = r.agency_type_id where c.key in ('all', 'electrical'))
+  = 'all:Client:false,all:PMC / Architect / Client person:true,all:VTECH Sales Team:true,all:VTech Installers:true,all:VTech Programmers:true,electrical:Electrician:true', 'v5: recipients and defaults from HansalV2 col C');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+set role authenticated;
+insert into public.projects (name, client_name) values ('TEST – v5', 'v5') ;
+create temp table t_v5p as select id from public.projects where name = 'TEST – v5';
+insert into public.floors (project_id, label, sort) select id, 'Ground', 1 from t_v5p;
+insert into public.rooms (project_id, floor_id, name, sort) select f.project_id, f.id, 'Rack', 1 from public.floors f where f.project_id = (select id from t_v5p);
+create temp table t_v5 as select public.add_room_product((select id from t_v5p), (select id from public.rooms where project_id = (select id from t_v5p)), (select id from public.product_catalogue where title = 'Switch /Router'), null) as id;
+create temp table t_v5i as select item_id, label from public.item_gate where room_product_id = (select id from t_v5);
+select pg_temp.assert(not (select waits_on_client from public.item_gate where item_id = (select item_id from t_v5i where label = 'Internet activation')), 'v5: internet activation no longer waits on client');
+reset role;
+update public.dependency_items set status = 'pending' where id in (select item_id from t_v5i where label in ('Internet activation', 'Readiness of cable'));
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+set role authenticated;
+select pg_temp.assert((select string_agg(category_key, ',' order by category_key) from public.reminder_category_items where item_id = (select item_id from t_v5i where label = 'Internet activation')) = 'all,sales', 'v5: magenta item listed under All + Sales');
+select pg_temp.assert((select string_agg(category_key, ',' order by category_key) from public.reminder_category_items where item_id = (select item_id from t_v5i where label = 'Readiness of cable')) = 'all,electrical', 'v5: electrician item listed under All + Only electrical');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+set role authenticated;
+do $$ begin
+  insert into public.reminder_categories (key, label) values ('x', 'x');
+  raise exception 'should have failed';
+exception when insufficient_privilege then raise notice 'ok - v5: a PM cannot edit reminder categories';
+end $$;
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
+set role authenticated;
+select pg_temp.assert((select count(*) from public.reminder_category_items) = 0, 'v5: outsider sees no category items (RLS)');
+select pg_temp.assert((select count(*) from public.reminder_categories) = 6, 'v5: any user reads the categories');
 reset role;
 
 \echo ALL SQL TESTS PASSED
