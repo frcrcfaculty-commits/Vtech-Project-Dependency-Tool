@@ -7,6 +7,8 @@ import { supabaseBrowser } from '@/lib/client/supabase';
 import { compressImageToWebP } from '@/lib/client/image';
 import { todayIST } from '@/lib/client/date';
 import { AppHeader } from '@/components/app-header';
+import { GroupingToggle, type SortBy } from '@/components/v6/grouping-toggle';
+import { Glyph } from '@/components/glass-icon';
 
 interface PendingItem {
   id: string;
@@ -119,6 +121,9 @@ export default function PendingPage() {
 
   // 3 Lanes: External · Internal · Waiting on client
   const [activeLane, setActiveLane] = useState<'external' | 'internal' | 'client'>('external');
+
+  // Grouping: Room-wise · Agency-wise · Product-wise
+  const [sortBy, setSortBy] = useState<SortBy>('agency');
 
   // Selection
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
@@ -411,7 +416,20 @@ export default function PendingPage() {
     }
   };
 
-  // Group filtered items by Project -> Agency
+  // Group filtered items by Project -> (Room | Agency | Product)
+  interface PendingGroup {
+    key: string;
+    label: string;
+    sub?: string;
+    agency?: {
+      id: string;
+      company_name: string;
+      agency_types: { id: string; name: string } | null;
+    } | null;
+    primaryContact?: AgencyContact | null;
+    items: PendingItem[];
+  }
+
   interface GroupedProject {
     project: {
       id: string;
@@ -420,15 +438,7 @@ export default function PendingPage() {
       l2_after: number | null;
       l3_after: number | null;
     };
-    agencies: {
-      agency: {
-        id: string;
-        company_name: string;
-        agency_types: { id: string; name: string } | null;
-      } | null;
-      contacts: AgencyContact[];
-      items: PendingItem[];
-    }[];
+    groups: PendingGroup[];
     totalItems: number;
   }
 
@@ -448,7 +458,7 @@ export default function PendingPage() {
       if (!projMap.has(projId)) {
         projMap.set(projId, {
           project: projData,
-          agencies: [],
+          groups: [],
           totalItems: 0,
         });
       }
@@ -456,21 +466,46 @@ export default function PendingPage() {
       const pGroup = projMap.get(projId)!;
       pGroup.totalItems++;
 
-      const agencyIdKey = item.agency_id ?? 'unassigned';
-      let aGroup = pGroup.agencies.find((a) => (a.agency?.id ?? 'unassigned') === agencyIdKey);
-      if (!aGroup) {
-        aGroup = {
-          agency: item.agencies ?? null,
-          contacts: item.agency_id ? contactsByAgency.get(item.agency_id) ?? [] : [],
+      let groupKey: string;
+      let label: string;
+      let sub: string | undefined;
+      const agency = item.agencies ?? null;
+      let primaryContact: AgencyContact | null = null;
+
+      if (sortBy === 'room') {
+        groupKey = item.room_id ?? 'unassigned';
+        label = item.rooms?.name ?? 'Room';
+        sub = item.rooms?.floors?.label ?? undefined;
+      } else if (sortBy === 'product') {
+        groupKey = item.room_products?.product_catalogue?.id ?? item.room_product_id ?? item.project_dependencies?.id ?? item.id;
+        label = item.room_products?.product_catalogue?.title ?? item.project_dependencies?.text ?? 'Dependency';
+        sub = item.room_products?.location ? `Location: ${item.room_products.location}` : undefined;
+      } else {
+        // sortBy === 'agency'
+        groupKey = item.agency_id ?? 'unassigned';
+        label = item.agencies?.company_name ?? 'No Contractor Assigned';
+        sub = item.agencies?.agency_types?.name ?? undefined;
+        const agencyContacts = item.agency_id ? contactsByAgency.get(item.agency_id) ?? [] : [];
+        primaryContact = agencyContacts.find((c) => c.phone) ?? agencyContacts[0] ?? null;
+      }
+
+      let gGroup = pGroup.groups.find((g) => g.key === groupKey);
+      if (!gGroup) {
+        gGroup = {
+          key: groupKey,
+          label,
+          sub,
+          agency,
+          primaryContact,
           items: [],
         };
-        pGroup.agencies.push(aGroup);
+        pGroup.groups.push(gGroup);
       }
-      aGroup.items.push(item);
+      gGroup.items.push(item);
     }
 
     return Array.from(projMap.values()).sort((a, b) => b.totalItems - a.totalItems || a.project.name.localeCompare(b.project.name));
-  }, [filteredItems, contactsByAgency]);
+  }, [filteredItems, sortBy, contactsByAgency]);
 
   // Selection handlers
   const handleToggleItem = (itemId: string) => {
@@ -482,8 +517,8 @@ export default function PendingPage() {
     });
   };
 
-  const handleToggleAgencyGroup = (agencyItems: PendingItem[]) => {
-    const ids = agencyItems.map((i) => i.id);
+  const handleToggleGroup = (groupItems: PendingItem[]) => {
+    const ids = groupItems.map((i) => i.id);
     const allSelected = ids.every((id) => selectedItemIds.has(id));
     setSelectedItemIds((prev) => {
       const next = new Set(prev);
@@ -497,7 +532,7 @@ export default function PendingPage() {
   };
 
   const handleToggleProjectGroup = (projectItems: GroupedProject) => {
-    const allProjItemIds = projectItems.agencies.flatMap((a) => a.items.map((i) => i.id));
+    const allProjItemIds = projectItems.groups.flatMap((g) => g.items.map((i) => i.id));
     const allSelected = allProjItemIds.every((id) => selectedItemIds.has(id));
     setSelectedItemIds((prev) => {
       const next = new Set(prev);
@@ -679,6 +714,16 @@ export default function PendingPage() {
     return Math.max(0, Math.floor((Date.now() - raised) / (1000 * 60 * 60 * 24)));
   };
 
+  const formatPendingDate = (dateStr: string | null) => {
+    if (!dateStr) return '—';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
   const totalPending = items.length;
   const totalProjects = filterOptions.projects.length;
 
@@ -724,6 +769,42 @@ export default function PendingPage() {
                 Refresh
               </button>
             </div>
+          </div>
+
+          {/* Top concise projects list: names only */}
+          <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Projects">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={projectFilter === 'all'}
+              onClick={() => setProjectFilter('all')}
+              className={`rounded-xl px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-all ${
+                projectFilter === 'all'
+                  ? 'bg-accent text-white shadow-xs'
+                  : 'border border-border bg-surface text-text-secondary hover:text-text-primary hover:bg-surface-alt'
+              }`}
+            >
+              All projects ({totalPending})
+            </button>
+            {filterOptions.projects.map((p) => {
+              const isSelected = projectFilter === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelected}
+                  onClick={() => setProjectFilter(p.id)}
+                  className={`rounded-xl px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-all ${
+                    isSelected
+                      ? 'bg-accent text-white shadow-xs'
+                      : 'border border-border bg-surface text-text-secondary hover:text-text-primary hover:bg-surface-alt'
+                  }`}
+                >
+                  {p.name}
+                </button>
+              );
+            })}
           </div>
 
           {/* Quick Metrics Cards */}
@@ -935,12 +1016,14 @@ export default function PendingPage() {
             </div>
           </div>
 
-          {/* Secondary Row: Age Pills */}
+          {/* Secondary Row: Grouping Toggle + Pending since Filter */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-2.5">
             <div className="flex flex-wrap items-center gap-3">
-              {/* Age Filter */}
+              <GroupingToggle value={sortBy} onChange={setSortBy} />
+
+              {/* Pending since Filter */}
               <div className="flex items-center gap-1.5 text-xs">
-                <span className="text-[11px] font-semibold text-text-secondary">Age:</span>
+                <span className="text-[11px] font-semibold text-text-secondary">Pending since:</span>
                 {(['all', '7', '14', '30'] as const).map((age) => (
                   <button
                     key={age}
@@ -1027,7 +1110,7 @@ export default function PendingPage() {
         ) : (
           <div className="space-y-6">
             {groupedData.map((pGroup) => {
-              const allProjIds = pGroup.agencies.flatMap((a) => a.items.map((i) => i.id));
+              const allProjIds = pGroup.groups.flatMap((g) => g.items.map((i) => i.id));
               const isProjFullySelected = allProjIds.length > 0 && allProjIds.every((id) => selectedItemIds.has(id));
               const isProjPartiallySelected =
                 allProjIds.some((id) => selectedItemIds.has(id)) && !isProjFullySelected;
@@ -1077,59 +1160,56 @@ export default function PendingPage() {
                     </div>
                   </div>
 
-                  {/* Agencies under Project */}
+                  {/* Groups under Project */}
                   <div className="divide-y divide-border/60">
-                    {pGroup.agencies.map((aGroup) => {
-                      const agencyIds = aGroup.items.map((i) => i.id);
-                      const isAgencyFullySelected = agencyIds.every((id) => selectedItemIds.has(id));
-                      const isAgencyPartiallySelected =
-                        agencyIds.some((id) => selectedItemIds.has(id)) && !isAgencyFullySelected;
-
-                      // Primary contact (Level 1 contact or first contact with phone)
-                      const primaryContact = aGroup.contacts.find((c) => c.phone) ?? aGroup.contacts[0];
+                    {pGroup.groups.map((gGroup) => {
+                      const groupIds = gGroup.items.map((i) => i.id);
+                      const isGroupFullySelected = groupIds.every((id) => selectedItemIds.has(id));
+                      const isGroupPartiallySelected =
+                        groupIds.some((id) => selectedItemIds.has(id)) && !isGroupFullySelected;
 
                       return (
-                        <div key={aGroup.agency?.id ?? 'unassigned'} className="p-3.5 space-y-3">
-                          {/* Agency Subheader */}
+                        <div key={gGroup.key} className="p-3.5 space-y-3">
+                          {/* Group Subheader */}
                           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-alt/40 px-3 py-2 border border-border/40">
                             <div className="flex items-center gap-2.5">
                               {activeLane !== 'client' && (
                                 <input
                                   type="checkbox"
-                                  checked={isAgencyFullySelected}
+                                  checked={isGroupFullySelected}
                                   ref={(el) => {
-                                    if (el) el.indeterminate = isAgencyPartiallySelected;
+                                    if (el) el.indeterminate = isGroupPartiallySelected;
                                   }}
-                                  onChange={() => handleToggleAgencyGroup(aGroup.items)}
+                                  onChange={() => handleToggleGroup(gGroup.items)}
                                   className="rounded border-border text-accent focus:ring-accent"
-                                  aria-label={`Select all items for ${aGroup.agency?.company_name ?? 'Unassigned'}`}
+                                  aria-label={`Select all items for ${gGroup.label}`}
                                 />
                               )}
                               <div>
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs font-bold text-text-primary">
-                                    {aGroup.agency?.company_name ?? 'No Contractor Assigned'}
+                                    {gGroup.label}
                                   </span>
-                                  {aGroup.agency?.agency_types?.name && (
+                                  {gGroup.sub && (
                                     <span className="rounded bg-border/60 px-1.5 py-0.2 text-[10px] font-semibold text-text-secondary">
-                                      {aGroup.agency.agency_types.name}
+                                      {gGroup.sub}
                                     </span>
                                   )}
                                   <span className="text-[11px] text-text-muted">
-                                    ({aGroup.items.length})
+                                    ({gGroup.items.length})
                                   </span>
                                 </div>
 
-                                {primaryContact && (
+                                {gGroup.primaryContact && (
                                   <div className="flex items-center gap-2 text-[11px] text-text-secondary mt-0.5">
                                     <span>
-                                      {primaryContact.name} ({primaryContact.designation})
+                                      {gGroup.primaryContact.name} ({gGroup.primaryContact.designation})
                                     </span>
-                                    {primaryContact.phone && (
+                                    {gGroup.primaryContact.phone && (
                                       <a
-                                        href={`tel:${primaryContact.phone}`}
+                                        href={`tel:${gGroup.primaryContact.phone}`}
                                         className="inline-flex items-center gap-1 font-semibold text-accent hover:underline"
-                                        title={`Call ${primaryContact.name}`}
+                                        title={`Call ${gGroup.primaryContact.name}`}
                                       >
                                         <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                           <path
@@ -1139,7 +1219,7 @@ export default function PendingPage() {
                                             d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
                                           />
                                         </svg>
-                                        {primaryContact.phone}
+                                        {gGroup.primaryContact.phone}
                                       </a>
                                     )}
                                   </div>
@@ -1150,9 +1230,12 @@ export default function PendingPage() {
 
                           {/* Items Table / Row List */}
                           <div className="divide-y divide-border/40 border border-border/50 rounded-lg overflow-hidden bg-surface">
-                            {aGroup.items.map((item) => {
+                            {gGroup.items.map((item) => {
                               const isSelected = selectedItemIds.has(item.id);
                               const daysOpen = getDaysOpen(item.first_raised_on);
+                              const itemContact = item.agency_id
+                                ? (contactsByAgency.get(item.agency_id)?.find((c) => c.phone) ?? contactsByAgency.get(item.agency_id)?.[0])
+                                : gGroup.primaryContact;
 
                               return (
                                 <div
@@ -1178,13 +1261,13 @@ export default function PendingPage() {
                                           {item.rooms?.floors?.label ?? 'Floor'} · {item.rooms?.name ?? 'Room'}
                                         </span>
 
-                                        {/* Age badge */}
+                                        {/* Pending since date */}
                                         <span
                                           className={`text-[10px] font-medium ${
                                             daysOpen >= 14 ? 'text-danger font-semibold' : 'text-text-muted'
                                           }`}
                                         >
-                                          {daysOpen}d open
+                                          Pending since {formatPendingDate(item.first_raised_on)}
                                         </span>
 
                                         {/* Reminder count */}
@@ -1279,11 +1362,11 @@ export default function PendingPage() {
                                     )}
 
                                     {/* Call Contractor */}
-                                    {primaryContact?.phone ? (
+                                    {itemContact?.phone ? (
                                       <a
-                                        href={`tel:${primaryContact.phone}`}
+                                        href={`tel:${itemContact.phone}`}
                                         className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors"
-                                        title={`Call ${primaryContact.name}: ${primaryContact.phone}`}
+                                        title={`Call ${itemContact.name}: ${itemContact.phone}`}
                                       >
                                         <svg className="h-3 w-3 text-text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                           <path
