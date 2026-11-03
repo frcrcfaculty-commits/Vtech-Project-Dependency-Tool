@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, use } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
@@ -94,9 +94,19 @@ export default function ProjectHomePage({
 }) {
   const { projectId } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { profile } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'agencies' | 'settings'>('overview');
+  const tabParam = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState<'overview' | 'agencies' | 'settings'>(
+    tabParam === 'agencies' ? 'agencies' : tabParam === 'settings' ? 'settings' : 'overview'
+  );
+
+  useEffect(() => {
+    if (tabParam === 'agencies' || tabParam === 'settings' || tabParam === 'overview') {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

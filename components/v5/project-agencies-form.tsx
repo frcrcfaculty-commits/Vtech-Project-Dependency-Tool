@@ -29,6 +29,13 @@ export interface GroupDraft {
   contacts: ContactDraft[];
 }
 
+export interface FollowupInfo {
+  id: string;
+  agency_type_id: string;
+  note: string | null;
+  remind_on: string;
+}
+
 export interface ProjectAgenciesFormProps {
   projectId: string;
   onSaved?: (message: string) => void;
@@ -51,6 +58,12 @@ export function ProjectAgenciesForm({
 
   const [agencyTypes, setAgencyTypes] = useState<AgencyType[]>([]);
   const [groups, setGroups] = useState<Record<string, GroupDraft>>({});
+  const [followups, setFollowups] = useState<Record<string, FollowupInfo>>({});
+
+  // Follow-up confirm modal state
+  const [confirmModalGroup, setConfirmModalGroup] = useState<AgencyType | null>(null);
+  const [confirmNote, setConfirmNote] = useState('');
+  const [savingFollowup, setSavingFollowup] = useState(false);
 
   const showSuccessNotice = (msg: string) => {
     setNotice(msg);
@@ -63,17 +76,25 @@ export function ProjectAgenciesForm({
       setError(null);
       const sb = supabaseBrowser();
 
-      const [{ data: typesData, error: typesErr }, { data: agenciesData, error: agenciesErr }] =
+      const [{ data: typesData, error: typesErr }, { data: agenciesData, error: agenciesErr }, { data: followupsData, error: followupsErr }] =
         await Promise.all([
           sb.from('agency_types').select('*').eq('active', true).order('sort'),
           sb.from('agencies').select('id, agency_type_id, company_name, agency_contacts(*)').eq('project_id', projectId),
+          sb.from('contact_followups').select('id, agency_type_id, note, remind_on').eq('project_id', projectId).is('done_at', null),
         ]);
 
       if (typesErr) throw typesErr;
       if (agenciesErr) throw agenciesErr;
+      if (followupsErr) throw followupsErr;
 
       const types = (typesData as AgencyType[]) ?? [];
       setAgencyTypes(types);
+
+      const followupsMap: Record<string, FollowupInfo> = {};
+      ((followupsData ?? []) as FollowupInfo[]).forEach((f) => {
+        followupsMap[f.agency_type_id] = f;
+      });
+      setFollowups(followupsMap);
 
       const existingAgencies = (agenciesData as Array<{
         id: string;
@@ -138,6 +159,81 @@ export function ProjectAgenciesForm({
 
   const externalTypes = useMemo(() => agencyTypes.filter((t) => !t.internal), [agencyTypes]);
   const internalTypes = useMemo(() => agencyTypes.filter((t) => t.internal), [agencyTypes]);
+
+  const hasContact = useCallback((typeId: string) => {
+    const g = groups[typeId];
+    if (!g) return false;
+    return g.contacts.some((c) => c.name.trim() && (c.email.trim() || c.phone.trim()));
+  }, [groups]);
+
+  const missingGroups = useMemo(() => {
+    return agencyTypes.filter((t) => !hasContact(t.id) && !followups[t.id]);
+  }, [agencyTypes, hasContact, followups]);
+
+  const formatFollowupDate = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const handleToggleFollowup = async (t: AgencyType, checked: boolean) => {
+    if (checked) {
+      setConfirmModalGroup(t);
+      setConfirmNote('');
+    } else {
+      const existing = followups[t.id];
+      if (existing) {
+        const sb = supabaseBrowser();
+        const { error: e } = await sb.from('contact_followups').delete().eq('id', existing.id);
+        if (!e) {
+          setFollowups((prev) => {
+            const next = { ...prev };
+            delete next[t.id];
+            return next;
+          });
+          showSuccessNotice(`Follow-up removed for ${t.name}`);
+        } else {
+          setError(e.message);
+        }
+      }
+    }
+  };
+
+  const handleConfirmFollowup = async () => {
+    if (!confirmModalGroup) return;
+    setSavingFollowup(true);
+    try {
+      const sb = supabaseBrowser();
+      const remindDate = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+      const { data, error: e } = await sb
+        .from('contact_followups')
+        .insert({
+          project_id: projectId,
+          agency_type_id: confirmModalGroup.id,
+          note: confirmNote.trim() || null,
+          remind_on: remindDate,
+        })
+        .select('id, agency_type_id, note, remind_on')
+        .single();
+
+      if (e) throw e;
+      if (data) {
+        setFollowups((prev) => ({
+          ...prev,
+          [confirmModalGroup.id]: data as FollowupInfo,
+        }));
+        showSuccessNotice(`Reminder set for 7 days for ${confirmModalGroup.name}`);
+      }
+      setConfirmModalGroup(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to set follow-up reminder');
+    } finally {
+      setSavingFollowup(false);
+    }
+  };
 
   const updateCompanyName = (typeId: string, name: string) => {
     setGroups((prev) => {
@@ -226,6 +322,11 @@ export function ProjectAgenciesForm({
 
     if (hasValidationErrors) {
       setError('Please fix the highlighted contact errors before saving.');
+      return;
+    }
+
+    if (isWizard && missingGroups.length > 0) {
+      setError(`Please add at least 1 contact or tick "Contact not finalised yet" for: ${missingGroups.map((t) => t.name).join(', ')}`);
       return;
     }
 
@@ -363,6 +464,15 @@ export function ProjectAgenciesForm({
         </div>
       )}
 
+      {isWizard && missingGroups.length > 0 && (
+        <div className="rounded-xl border border-warning/40 bg-warning-light p-3.5 text-xs text-warning">
+          <p className="font-bold">Missing contacts or follow-up reminders ({missingGroups.length}):</p>
+          <p className="mt-1 leading-relaxed">
+            Every active group requires at least 1 contact or a 7-day follow-up before continuing. Still missing: <strong>{missingGroups.map((t) => t.name).join(', ')}</strong>
+          </p>
+        </div>
+      )}
+
       {/* ────────────────── SECTION 1: EXTERNAL AGENCIES ────────────────── */}
       <div className="space-y-4">
         <div className="border-b border-border pb-2">
@@ -455,6 +565,26 @@ export function ProjectAgenciesForm({
                       )}
                     </div>
                   ))}
+                </div>
+
+                {/* Follow-up / Not finalised */}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2.5">
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={!!followups[t.id]}
+                      onChange={(e) => handleToggleFollowup(t, e.target.checked)}
+                      className="rounded border-border text-accent focus:ring-accent"
+                    />
+                    <span>Contact not finalised yet</span>
+                  </label>
+
+                  {followups[t.id] && (
+                    <span className="inline-flex items-center gap-1.5 rounded-md bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">
+                      Reminder set for {formatFollowupDate(followups[t.id].remind_on)}
+                      {followups[t.id].note ? ` · “${followups[t.id].note}”` : ''}
+                    </span>
+                  )}
                 </div>
               </div>
             );
@@ -576,6 +706,26 @@ export function ProjectAgenciesForm({
                     + Add contact
                   </button>
                 </div>
+
+                {/* Follow-up / Not finalised */}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2.5">
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={!!followups[t.id]}
+                      onChange={(e) => handleToggleFollowup(t, e.target.checked)}
+                      className="rounded border-border text-accent focus:ring-accent"
+                    />
+                    <span>Contact not finalised yet</span>
+                  </label>
+
+                  {followups[t.id] && (
+                    <span className="inline-flex items-center gap-1.5 rounded-md bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">
+                      Reminder set for {formatFollowupDate(followups[t.id].remind_on)}
+                      {followups[t.id].note ? ` · “${followups[t.id].note}”` : ''}
+                    </span>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -583,7 +733,7 @@ export function ProjectAgenciesForm({
       </div>
 
       {/* ────────────────── ACTIONS / NAVIGATION ────────────────── */}
-      <div className="flex items-center justify-between pt-4 border-t border-border">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-border">
         {isWizard && onBack ? (
           <button
             type="button"
@@ -594,16 +744,71 @@ export function ProjectAgenciesForm({
           </button>
         ) : <div />}
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
+          {isWizard && missingGroups.length > 0 && (
+            <span className="text-[11px] text-warning font-medium">
+              Missing {missingGroups.length} contact{missingGroups.length === 1 ? '' : 's'} or follow-up{missingGroups.length === 1 ? '' : 's'}
+            </span>
+          )}
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || (isWizard && missingGroups.length > 0)}
             className="rounded-lg bg-accent px-5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors disabled:opacity-50"
           >
             {saving ? 'Saving…' : isWizard ? 'Save & Next: Room Products →' : 'Save Agencies & Contacts'}
           </button>
         </div>
       </div>
+
+      {/* ────────────────── FOLLOW-UP CONFIRM MODAL ────────────────── */}
+      {confirmModalGroup && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs"
+        >
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-2xl">
+            <h3 className="text-sm font-bold text-text-primary">
+              Remind me in 7 days to add the {confirmModalGroup.name} contact?
+            </h3>
+            <p className="mt-1 text-xs text-text-secondary">
+              We will remind you in the notifications bell and dashboard after 7 days.
+            </p>
+
+            <div className="mt-3">
+              <label className="block text-[11px] font-semibold text-text-secondary mb-1">
+                Optional note:
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Client to provide phone number next week"
+                value={confirmNote}
+                onChange={(e) => setConfirmNote(e.target.value)}
+                className="w-full rounded-lg border border-border bg-surface-alt px-3 py-1.5 text-xs text-text-primary focus:border-accent focus:bg-surface focus:outline-none"
+              />
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmModalGroup(null)}
+                disabled={savingFollowup}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-alt"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmFollowup}
+                disabled={savingFollowup}
+                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
+              >
+                {savingFollowup ? 'Setting…' : 'Remind me in 7 days'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </form>
   );
 }
