@@ -12,7 +12,7 @@ export async function GET() {
   return handle(async () => {
     const { db } = await requireUser();
     const { data: projects, error: pErr } = await db.from('projects')
-      .select('id, name, client_name, l2_after, l3_after, mgmt_cc_level, status').neq('status', 'closed').order('name');
+      .select('id, name, client_name, status').neq('status', 'closed').order('name');
     if (pErr) throw pErr;
     const ids = (projects ?? []).map((p) => p.id);
 
@@ -23,7 +23,7 @@ export async function GET() {
       const { data, error } = await db.from('dependency_items')
         .select(`project_id, first_raised_on, reminder_count, note,
           rooms(name, sort, floors(label, sort)), project_dependencies(text, seq),
-          agencies(company_name, escalation_enabled, agency_types(name, sort))`)
+          agencies(company_name, agency_types(name, sort))`)
         .in('project_id', ids).eq('status', 'pending').order('id').range(from, from + 999);
       if (error) throw error;
       items.push(...(data ?? []));
@@ -32,18 +32,16 @@ export async function GET() {
 
     const byProject = new Map<string, PortfolioProject>();
     for (const p of projects ?? []) {
-      byProject.set(p.id, { name: p.name, clientName: p.client_name, items: [], escalationByAgency: {},
-        policy: { l2After: p.l2_after, l3After: p.l3_after, mgmtCcLevel: p.mgmt_cc_level } });
+      byProject.set(p.id, { name: p.name, clientName: p.client_name, items: [] });
     }
     for (const i of items) {
       const room = one<{ name: string; sort: number; floors: unknown }>(i.rooms);
       const floor = one<{ label: string; sort: number }>(room?.floors);
       const dep = one<{ text: string; seq: number }>(i.project_dependencies);
-      const ag = one<{ company_name: string; escalation_enabled: boolean; agency_types: unknown }>(i.agencies);
+      const ag = one<{ company_name: string; agency_types: unknown }>(i.agencies);
       const type = one<{ name: string; sort: number }>(ag?.agency_types);
       const proj = byProject.get(i.project_id)!;
       const company = ag?.company_name ?? '—';
-      proj.escalationByAgency![company] = ag?.escalation_enabled ?? true;
       const row: PortfolioItem = {
         floorLabel: floor?.label ?? '', floorSort: floor?.sort ?? 0, roomName: room?.name ?? '', roomSort: room?.sort ?? 0,
         agencyType: type?.name ?? 'Unassigned', agencyTypeSort: type?.sort ?? 999, company,
