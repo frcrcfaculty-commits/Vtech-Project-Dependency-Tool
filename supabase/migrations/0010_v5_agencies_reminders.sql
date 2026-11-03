@@ -28,27 +28,27 @@ alter table public.agency_contacts alter column designation drop not null;
 alter table public.agency_contacts alter column level set default 1;
 
 -- ── 2. re-point defaults of retired types ──
-create temp table v5_map (old_name text, new_name text);
-insert into v5_map values
-  ('Architect', 'PMC / Architect / Client person'), ('Painter', 'PMC / Architect / Client person'),
-  ('Curtain Vendor', 'PMC / Architect / Client person'), ('AC Vendor', 'PMC / Architect / Client person'),
-  ('Network Agency', 'Client'), ('VTech Project Managers', 'VTECH Sales Team');
-
+-- (no temp tables: the Supabase SQL editor rejects them across statements)
 update public.product_steps s set default_agency_type_id = n.id,
        responsibility = case when n.internal then 'internal' when n.name = 'Client' then 'client' else 'external' end
-  from public.agency_types o, v5_map m, public.agency_types n
+  from public.agency_types o,
+       (values ('Architect', 'PMC / Architect / Client person'), ('Painter', 'PMC / Architect / Client person'),
+               ('Curtain Vendor', 'PMC / Architect / Client person'), ('AC Vendor', 'PMC / Architect / Client person'),
+               ('Network Agency', 'Client'), ('VTech Project Managers', 'VTECH Sales Team')) m(old_name, new_name),
+       public.agency_types n
  where s.default_agency_type_id = o.id and o.name = m.old_name and n.name = m.new_name;
-update public.step_reasons r set agency_type = m.new_name from v5_map m where r.agency_type = m.old_name;
+update public.step_reasons r set agency_type = m.new_name
+  from (values ('Architect', 'PMC / Architect / Client person'), ('Painter', 'PMC / Architect / Client person'),
+               ('Curtain Vendor', 'PMC / Architect / Client person'), ('AC Vendor', 'PMC / Architect / Client person'),
+               ('Network Agency', 'Client'), ('VTech Project Managers', 'VTECH Sales Team')) m(old_name, new_name)
+ where r.agency_type = m.old_name;
 
 -- ── 3. catalogue colours (same pattern as 0009 §6; labels unchanged so existing items keep their names) ──
-create temp table v5_magenta (title text, label text);
-insert into v5_magenta values ('Curtain', 'Fabric installation'), ('Ekey scanner', 'Client impressions'),
-  ('Dimmer dali', 'Scene setting'), ('Dimmer', 'Scene setting'), ('Switch /Router', 'Internet activation');
-
 update public.product_steps s set responsibility = 'internal', sheet_colour = 'FF00FF',
        default_agency_type_id = (select id from public.agency_types where name = 'VTECH Sales Team')
-  from public.product_catalogue p, v5_magenta m
- where p.id = s.product_id and p.title = m.title and s.label = m.label;
+  from public.product_catalogue p
+ where p.id = s.product_id and (p.title, s.label) in (('Curtain', 'Fabric installation'), ('Ekey scanner', 'Client impressions'),
+       ('Dimmer dali', 'Scene setting'), ('Dimmer', 'Scene setting'), ('Switch /Router', 'Internet activation'));
 update public.project_dependencies d set agency_type_id = s.default_agency_type_id
   from public.product_steps s where d.step_id = s.id and s.sheet_colour = 'FF00FF';
 update public.dependency_items i set responsibility = 'internal',
@@ -118,5 +118,3 @@ select i.project_id, c.key as category_key, i.id as item_id, t.id as agency_type
  where i.status = 'pending';
 grant select on public.reminder_categories, public.reminder_category_recipients, public.reminder_category_items to authenticated;
 
-drop table v5_map;
-drop table v5_magenta;
