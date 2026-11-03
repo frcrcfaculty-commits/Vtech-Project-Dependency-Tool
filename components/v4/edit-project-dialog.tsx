@@ -15,8 +15,6 @@ export interface EditableProject {
   client_name: string | null;
   site_address: string | null;
   status: string;
-  l2_after: number;
-  l3_after: number;
 }
 export interface EditableLine {
   id: string;
@@ -67,7 +65,6 @@ export function EditProjectDialog({
     const out: { what: string; from: string; to: string }[] = [];
     const fields: [keyof EditableProject, string][] = [
       ['name', 'Project name'], ['client_name', 'Client name'], ['site_address', 'Site address'], ['status', 'Status'],
-      ['l2_after', 'Escalate to level 2 after (reminders)'], ['l3_after', 'Escalate to level 3 after (reminders)'],
     ];
     for (const [k, label] of fields) {
       const a = k === 'status' ? STATUS_LABEL[String(project[k])] : s(project[k]);
@@ -95,7 +92,7 @@ export function EditProjectDialog({
       const sb = supabaseBrowser();
       const { error: pErr } = await sb.from('projects').update({
         name: p.name.trim(), client_name: p.client_name?.trim() || null, site_address: p.site_address?.trim() || null,
-        status: p.status, l2_after: Number(p.l2_after), l3_after: Number(p.l3_after),
+        status: p.status,
       }).eq('id', p.id);
       if (pErr) throw pErr;
       for (const l of ls) {
@@ -172,10 +169,6 @@ export function EditProjectDialog({
                   {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </label>
-              <div className="grid grid-cols-2 gap-2">
-                <label className={label}>L2 after<input type="number" min={1} className={input} value={p.l2_after} onChange={(e) => setP({ ...p, l2_after: Number(e.target.value) })} /></label>
-                <label className={label}>L3 after<input type="number" min={1} className={input} value={p.l3_after} onChange={(e) => setP({ ...p, l3_after: Number(e.target.value) })} /></label>
-              </div>
             </div>
 
             <h3 className="mt-5 text-sm font-semibold">BOQ lines</h3>

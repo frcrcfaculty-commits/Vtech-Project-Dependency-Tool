@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabaseBrowser } from '@/lib/client/supabase';
+import { stepColour, isDone, type GateRow } from '@/lib/client/steps';
 
 export interface RoomProductPickerProps {
   projectId: string;
@@ -85,6 +86,7 @@ export function RoomProductPicker({
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [steps, setSteps] = useState<ProductStep[]>([]);
   const [placedProducts, setPlacedProducts] = useState<PlacedRoomProduct[]>([]);
+  const [gate, setGate] = useState<GateRow[]>([]);
 
   // Selected scope / room: activeRoomId is null for Project-wide
   const [selectedFloorId, setSelectedFloorId] = useState<string>('');
@@ -108,6 +110,16 @@ export function RoomProductPicker({
     setTimeout(() => setNotice(null), 3000);
   };
 
+  const refreshPlacedAndGate = async () => {
+    const sb = supabaseBrowser();
+    const [{ data: freshPlaced }, { data: freshGate }] = await Promise.all([
+      sb.from('room_products').select('*, product_catalogue(*), rooms(*)').eq('project_id', projectId),
+      sb.from('item_gate').select('*').eq('project_id', projectId).order('seq'),
+    ]);
+    if (freshPlaced) setPlacedProducts(freshPlaced as unknown as PlacedRoomProduct[]);
+    if (freshGate) setGate((freshGate as GateRow[]) ?? []);
+  };
+
   // Load project rooms, products catalogue, steps, and placed room products
   const loadData = useCallback(async () => {
     try {
@@ -121,12 +133,14 @@ export function RoomProductPicker({
         { data: pData, error: pErr },
         { data: sData, error: sErr },
         { data: rpData, error: rpErr },
+        { data: gData, error: gErr },
       ] = await Promise.all([
         sb.from('floors').select('*').eq('project_id', projectId).order('sort'),
         sb.from('rooms').select('*').eq('project_id', projectId).order('sort'),
         sb.from('product_catalogue').select('*').eq('active', true).order('sort'),
         sb.from('product_steps').select('*').order('seq'),
         sb.from('room_products').select('*, product_catalogue(*), rooms(*)').eq('project_id', projectId),
+        sb.from('item_gate').select('*').eq('project_id', projectId).order('seq'),
       ]);
 
       if (fErr) throw fErr;
@@ -134,18 +148,21 @@ export function RoomProductPicker({
       if (pErr) throw pErr;
       if (sErr) throw sErr;
       if (rpErr) throw rpErr;
+      if (gErr) throw gErr;
 
       const loadedFloors: Floor[] = (fData as Floor[]) ?? [];
       const loadedRooms: Room[] = (rData as Room[]) ?? [];
       const loadedProducts: ProductItem[] = (pData as ProductItem[]) ?? [];
       const loadedSteps: ProductStep[] = (sData as ProductStep[]) ?? [];
       const loadedPlaced = (rpData as unknown as PlacedRoomProduct[]) ?? [];
+      const loadedGate = (gData as GateRow[]) ?? [];
 
       setFloors(loadedFloors);
       setRooms(loadedRooms);
       setProducts(loadedProducts);
       setSteps(loadedSteps);
       setPlacedProducts(loadedPlaced);
+      setGate(loadedGate);
 
       // Initialize room selection if not set
       if (!isProjectWide) {
@@ -206,6 +223,19 @@ export function RoomProductPicker({
     });
     return map;
   }, [steps]);
+
+  // Group gate rows by room_product_id
+  const gateByRoomProduct = useMemo(() => {
+    const map = new Map<string, GateRow[]>();
+    gate.forEach((g) => {
+      if (g.room_product_id) {
+        const arr = map.get(g.room_product_id) ?? [];
+        arr.push(g);
+        map.set(g.room_product_id, arr);
+      }
+    });
+    return map;
+  }, [gate]);
 
   // Placed products counts by room
   const placedCountByRoom = useMemo(() => {
@@ -288,13 +318,8 @@ export function RoomProductPicker({
 
       if (rpcErr) throw rpcErr;
 
-      // Reload placed products
-      const { data: freshPlaced, error: rpErr } = await sb
-        .from('room_products')
-        .select('*, product_catalogue(*), rooms(*)')
-        .eq('project_id', projectId);
-      if (rpErr) throw rpErr;
-      setPlacedProducts((freshPlaced as unknown as PlacedRoomProduct[]) ?? []);
+      // Reload placed products and item_gate
+      await refreshPlacedAndGate();
 
       showSuccessNotice(`Added ${product.title}${finalLocation ? ` (${finalLocation})` : ''} to room`);
     } catch (err) {
@@ -321,12 +346,7 @@ export function RoomProductPicker({
       });
       if (rpcErr) throw rpcErr;
 
-      const { data: freshPlaced, error: rpErr } = await sb
-        .from('room_products')
-        .select('*, product_catalogue(*), rooms(*)')
-        .eq('project_id', projectId);
-      if (rpErr) throw rpErr;
-      setPlacedProducts((freshPlaced as unknown as PlacedRoomProduct[]) ?? []);
+      await refreshPlacedAndGate();
 
       showSuccessNotice(`Removed ${title}${loc}`);
     } catch (err) {
@@ -362,13 +382,8 @@ export function RoomProductPicker({
         addedCount++;
       }
 
-      // Reload placed
-      const { data: freshPlaced, error: rpErr } = await sb
-        .from('room_products')
-        .select('*, product_catalogue(*), rooms(*)')
-        .eq('project_id', projectId);
-      if (rpErr) throw rpErr;
-      setPlacedProducts((freshPlaced as unknown as PlacedRoomProduct[]) ?? []);
+      // Reload placed and gate
+      await refreshPlacedAndGate();
 
       setShowCopyModal(false);
       setCopySourceRoomId('');
@@ -583,62 +598,90 @@ export function RoomProductPicker({
             Select products from the catalogue below to add them.
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="divide-y divide-border rounded-xl border border-border overflow-hidden bg-surface">
             {currentPlacedProducts.map((rp) => {
               const product = rp.product_catalogue;
-              const productSteps = stepsByProduct.get(rp.product_id) ?? [];
+              const rpGate = gateByRoomProduct.get(rp.id) ?? [];
+              const pSteps = stepsByProduct.get(rp.product_id) ?? [];
+              const displaySteps =
+                rpGate.length > 0
+                  ? rpGate
+                  : pSteps.map((st) => ({
+                      item_id: st.id,
+                      label: st.label,
+                      status: 'unchecked' as const,
+                      locked: false,
+                      sheet_colour: st.sheet_colour ?? 'D9EAD3',
+                    }));
+              const total = displaySteps.length;
+              const done = displaySteps.filter((r) => isDone(r.status)).length;
+              const progressPct = total > 0 ? Math.round((100 * done) / total) : 0;
+
               return (
                 <div
                   key={rp.id}
-                  className="rounded-xl border border-border bg-surface-alt p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 transition-colors hover:border-accent/30"
+                  className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5 px-3 text-[13px] bg-surface hover:bg-surface-alt/40 transition-colors sm:flex-nowrap sm:h-10"
                 >
-                  <div className="space-y-1.5 flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h4 className="text-sm font-bold text-text-primary">{product?.title ?? 'Product'}</h4>
-                      {rp.location && (
-                        <span className="rounded-md bg-surface border border-border px-2 py-0.5 text-xs font-semibold text-text-secondary">
-                          📍 {rp.location}
-                        </span>
-                      )}
-                      {rp.quantity > 1 && (
-                        <span className="rounded-md bg-accent/15 text-accent border border-accent/20 px-1.5 py-0.5 text-xs font-bold">
-                          Qty: {rp.quantity}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Step chain preview dots with sheet colours */}
-                    <div className="flex items-center gap-1.5 pt-1">
-                      <span className="text-[11px] font-medium text-text-secondary">Steps ({productSteps.length}):</span>
-                      <div className="flex items-center gap-1 flex-wrap">
-                        {productSteps.map((st) => {
-                          const col = getStepDotColor(st.sheet_colour);
-                          return (
-                            <span
-                              key={st.id}
-                              title={`Step ${st.seq}: ${st.label} (${col.label})`}
-                              className="inline-block h-3.5 w-3.5 rounded-full border shadow-2xs transition-transform hover:scale-125 cursor-help"
-                              style={{
-                                backgroundColor: col.bg,
-                                borderColor: col.border,
-                              }}
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 self-end md:self-center">
-                    <button
-                      type="button"
-                      disabled={saving}
-                      onClick={() => handleRemoveProduct(rp)}
-                      className="text-xs font-medium text-text-muted hover:text-danger px-2.5 py-1.5 rounded-lg hover:bg-danger-light/30 transition-colors disabled:opacity-50"
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0 flex-1">
+                    <span
+                      className="font-semibold text-text-primary truncate min-w-[120px] max-w-[200px]"
+                      title={product?.title ?? 'Product'}
                     >
-                      Remove
-                    </button>
+                      {product?.title ?? 'Product'}
+                    </span>
+                    {rp.location && (
+                      <span className="text-xs text-text-secondary truncate">
+                        · {rp.location}
+                      </span>
+                    )}
+                    <span className="text-xs tabular-nums text-text-secondary whitespace-nowrap">
+                      · Qty: {rp.quantity}
+                    </span>
+                    {/* Step dots */}
+                    <div
+                      className="flex items-center gap-1 shrink-0"
+                      title={`Steps: ${done}/${total} done`}
+                    >
+                      {displaySteps.map((st) => {
+                        const col = stepColour(st.sheet_colour);
+                        const finished = isDone(st.status);
+                        const isPending = st.status === 'pending';
+                        const isLocked = st.locked && !finished;
+                        const tip = `${st.label}: ${isLocked ? 'locked' : finished ? 'done' : isPending ? 'pending' : 'open'}`;
+
+                        return (
+                          <span
+                            key={st.item_id}
+                            title={tip}
+                            className={`h-2 w-2 rounded-full shrink-0 ${
+                              isLocked
+                                ? 'bg-slate-300 ring-1 ring-slate-400'
+                                : finished
+                                ? 'ring-1 ring-black/10'
+                                : isPending
+                                ? 'bg-white ring-2 ring-danger'
+                                : 'bg-white ring-1 ring-slate-300'
+                            }`}
+                            style={{
+                              backgroundColor: finished ? col.ring || col.bg : undefined,
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                    <span className="text-xs font-semibold tabular-nums text-text-secondary whitespace-nowrap">
+                      {progressPct}%
+                    </span>
                   </div>
+
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleRemoveProduct(rp)}
+                    className="h-7 shrink-0 text-xs font-medium text-text-muted hover:text-danger px-2.5 py-1 rounded-lg hover:bg-danger-light/30 transition-colors disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
                 </div>
               );
             })}
@@ -694,8 +737,8 @@ export function RoomProductPicker({
           </span>
         </div>
 
-        {/* Products Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        {/* Products List (One-line rows, ≤ 44px tall, text 13px, padding 6px, divide-y divide-border) */}
+        <div className="divide-y divide-border rounded-xl border border-border overflow-hidden bg-surface">
           {filteredProducts.map((p) => {
             const pSteps = stepsByProduct.get(p.id) ?? [];
             const cfg = productConfigs[p.id] ?? {
@@ -709,28 +752,100 @@ export function RoomProductPicker({
             return (
               <div
                 key={p.id}
-                className="rounded-xl border border-border bg-surface p-4 flex flex-col justify-between space-y-3 shadow-2xs hover:border-accent/40 transition-colors"
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5 px-3 text-[13px] bg-surface hover:bg-surface-alt/40 transition-colors sm:flex-nowrap sm:h-10"
               >
-                <div>
-                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <h4 className="text-sm font-bold text-text-primary">{p.title}</h4>
-                    <span className="text-[10px] font-bold uppercase rounded bg-surface-alt border border-border px-1.5 py-0.5 text-text-secondary">
-                      {pSteps.length} steps
-                    </span>
-                  </div>
+                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0 flex-1">
+                  <span
+                    className="font-semibold text-text-primary truncate min-w-[120px] max-w-[200px]"
+                    title={p.title}
+                  >
+                    {p.title}
+                  </span>
 
-                  {/* Step dots preview */}
-                  <div className="flex items-center gap-1 flex-wrap mb-2">
+                  {!isProjectWide && (
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={cfg.location}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setProductConfigs((prev) => ({
+                            ...prev,
+                            [p.id]: { ...(prev[p.id] ?? cfg), location: val },
+                          }));
+                        }}
+                        className="h-7 rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-primary focus:border-accent"
+                      >
+                        {(p.location_options ?? []).map((loc) => (
+                          <option key={loc} value={loc}>
+                            {loc}
+                          </option>
+                        ))}
+                        <option value="__custom__">Other…</option>
+                      </select>
+                      {isCustomLoc && (
+                        <input
+                          type="text"
+                          placeholder="Other location…"
+                          value={cfg.customLocation}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setProductConfigs((prev) => ({
+                              ...prev,
+                              [p.id]: { ...(prev[p.id] ?? cfg), customLocation: val },
+                            }));
+                          }}
+                          className="h-7 w-28 rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-primary focus:border-accent"
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {!isProjectWide && (
+                    <div className="inline-flex items-center rounded-md border border-border bg-surface-alt/60">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newQty = Math.max(1, (cfg.quantity || 1) - 1);
+                          setProductConfigs((prev) => ({
+                            ...prev,
+                            [p.id]: { ...(prev[p.id] ?? cfg), quantity: newQty },
+                          }));
+                        }}
+                        className="h-6 w-6 flex items-center justify-center text-xs font-bold text-text-secondary hover:text-text-primary"
+                      >
+                        −
+                      </button>
+                      <span className="min-w-[18px] text-center text-xs font-bold tabular-nums text-text-primary">
+                        {cfg.quantity || 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newQty = (cfg.quantity || 1) + 1;
+                          setProductConfigs((prev) => ({
+                            ...prev,
+                            [p.id]: { ...(prev[p.id] ?? cfg), quantity: newQty },
+                          }));
+                        }}
+                        className="h-6 w-6 flex items-center justify-center text-xs font-bold text-text-secondary hover:text-text-primary"
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Step-chain dots */}
+                  <div className="flex items-center gap-1 shrink-0" title={`${pSteps.length} steps`}>
                     {pSteps.map((st) => {
-                      const col = getStepDotColor(st.sheet_colour);
+                      const col = stepColour(st.sheet_colour);
                       return (
                         <span
                           key={st.id}
-                          title={`Step ${st.seq}: ${st.label} (${col.label})`}
-                          className="h-2.5 w-2.5 rounded-full border"
+                          title={st.label}
+                          className="h-2 w-2 rounded-full shrink-0"
                           style={{
                             backgroundColor: col.bg,
-                            borderColor: col.border,
+                            boxShadow: `0 0 0 1px ${col.ring}`,
                           }}
                         />
                       );
@@ -738,105 +853,14 @@ export function RoomProductPicker({
                   </div>
                 </div>
 
-                {/* Configuration: Location & Quantity */}
-                <div className="space-y-2 pt-2 border-t border-border/60">
-                  {!isProjectWide && (
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-semibold text-text-secondary">Location</label>
-                      <select
-                        value={cfg.location}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setProductConfigs((prev) => ({
-                            ...prev,
-                            [p.id]: {
-                              ...(prev[p.id] ?? cfg),
-                              location: val,
-                            },
-                          }));
-                        }}
-                        className="w-full rounded-lg border border-border bg-surface-alt px-2.5 py-1.5 text-xs focus:border-accent"
-                      >
-                        {(p.location_options ?? []).map((loc) => (
-                          <option key={loc} value={loc}>
-                            {loc}
-                          </option>
-                        ))}
-                        <option value="__custom__">+ Other (custom location)…</option>
-                      </select>
-
-                      {isCustomLoc && (
-                        <input
-                          type="text"
-                          placeholder="Type custom location (e.g. Sofa side, Balcony)…"
-                          value={cfg.customLocation}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setProductConfigs((prev) => ({
-                              ...prev,
-                              [p.id]: {
-                                ...(prev[p.id] ?? cfg),
-                                customLocation: val,
-                              },
-                            }));
-                          }}
-                          className="w-full rounded-lg border border-border bg-surface px-2.5 py-1 text-xs focus:border-accent mt-1"
-                        />
-                      )}
-                    </div>
-                  )}
-
-                  {/* Quantity & Action Button */}
-                  <div className="flex items-center justify-between gap-2 pt-1">
-                    {!isProjectWide ? (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-medium text-text-secondary">Qty:</span>
-                        <div className="flex items-center border border-border rounded-lg bg-surface-alt">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newQty = Math.max(1, (cfg.quantity || 1) - 1);
-                              setProductConfigs((prev) => ({
-                                ...prev,
-                                [p.id]: { ...(prev[p.id] ?? cfg), quantity: newQty },
-                              }));
-                            }}
-                            className="px-2 py-1 text-xs font-bold text-text-secondary hover:text-text-primary"
-                          >
-                            –
-                          </button>
-                          <span className="px-2 py-1 text-xs font-bold text-text-primary min-w-[20px] text-center">
-                            {cfg.quantity || 1}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newQty = (cfg.quantity || 1) + 1;
-                              setProductConfigs((prev) => ({
-                                ...prev,
-                                [p.id]: { ...(prev[p.id] ?? cfg), quantity: newQty },
-                              }));
-                            }}
-                            className="px-2 py-1 text-xs font-bold text-text-secondary hover:text-text-primary"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <span className="text-[11px] text-text-muted">Scope: Project-wide</span>
-                    )}
-
-                    <button
-                      type="button"
-                      disabled={saving}
-                      onClick={() => handleAddProduct(p)}
-                      className="rounded-lg bg-accent px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-accent-hover transition-colors disabled:opacity-50"
-                    >
-                      + Add to {isProjectWide ? 'Project' : 'Room'}
-                    </button>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => handleAddProduct(p)}
+                  className="h-7 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-white hover:bg-accent-hover transition-colors disabled:opacity-50"
+                >
+                  Add
+                </button>
               </div>
             );
           })}

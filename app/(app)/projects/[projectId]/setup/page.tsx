@@ -66,8 +66,8 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
   const searchParams = useSearchParams();
   const { profile } = useAuth();
 
-  // Step state: 1: Basics, 2: Floors & Rooms, 3: Agencies, 4: Dependencies, 5: Apply to Rooms, 6: Escalation & Terms
-  const initialStep = Math.max(1, Math.min(6, parseInt(searchParams.get('step') ?? '2', 10)));
+  // Step state: 1: Basics, 2: Floors & Rooms, 3: Agencies, 4: Room Products
+  const initialStep = Math.max(1, Math.min(4, parseInt(searchParams.get('step') ?? '2', 10)));
   const [currentStep, setCurrentStep] = useState(initialStep);
   const [wizardRoomId, setWizardRoomId] = useState<string>('');
 
@@ -95,20 +95,9 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
   const [agencyModalMode, setAgencyModalMode] = useState<'external' | 'internal'>('external');
   const [newAgencyTypeId, setNewAgencyTypeId] = useState('');
   const [newAgencyCompany, setNewAgencyCompany] = useState('');
-  const [newAgencyEscalation, setNewAgencyEscalation] = useState(true);
   const [newAgencyContacts, setNewAgencyContacts] = useState<AgencyContact[]>([
     { name: '', designation: '', level: 1, phone: '', email: '' },
   ]);
-
-  // Step 4 local states
-
-  // Step 5 local states: Matrix (roomId_depId)
-
-  // Step 6 local states: Escalation & Terms
-  const [l2After, setL2After] = useState(3);
-  const [l3After, setL3After] = useState(6);
-  const [mgmtCcLevel, setMgmtCcLevel] = useState(3);
-  const [termsText, setTermsText] = useState('');
 
   const loadAll = useCallback(async () => {
     try {
@@ -169,15 +158,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
       if (Array.isArray(presetsVal)) {
         setRoomPresets(presetsVal as string[]);
       }
-
-      // Project escalation & terms
-      if (proj) {
-        setL2After(proj.l2_after ?? 3);
-        setL3After(proj.l3_after ?? 6);
-        setMgmtCcLevel(proj.mgmt_cc_level ?? 3);
-        setTermsText(proj.terms ?? '');
-      }
-
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load project');
     } finally {
@@ -347,7 +327,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
           project_id: projectId,
           agency_type_id: newAgencyTypeId,
           company_name: newAgencyCompany.trim(),
-          escalation_enabled: newAgencyEscalation,
+          escalation_enabled: true,
         })
         .select('id')
         .single();
@@ -474,35 +454,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
     }
   }
 
-  // ───────────────────────── STEP 5: ESCALATION & TERMS ─────────────────────────
-  async function handleFinishSetup(e: React.FormEvent) {
-    e.preventDefault();
-    if (l3After <= l2After) {
-      setError('L3 threshold must be strictly greater than L2 threshold');
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const sb = supabaseBrowser();
-      const { error: err } = await sb
-        .from('projects')
-        .update({
-          l2_after: l2After,
-          l3_after: l3After,
-          mgmt_cc_level: mgmtCcLevel,
-          terms: termsText,
-        })
-        .eq('id', projectId);
-      if (err) throw err;
-
-      router.push(`/projects/${projectId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save settings');
-      setSaving(false);
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-surface-alt">
@@ -516,7 +467,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
     { num: 2, label: 'Floors & Rooms' },
     { num: 3, label: 'Agencies' },
     { num: 4, label: 'Room Products' },
-    { num: 5, label: 'Escalation' },
   ];
 
   return (
@@ -541,7 +491,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                 Project Setup: {project?.name}
               </h1>
               <p className="text-xs text-text-secondary mt-0.5">
-                Step {currentStep} of 5 — Each step saves immediately. You can exit and resume anytime.
+                Step {currentStep} of 4 — Each step saves immediately. You can exit and resume anytime.
               </p>
             </div>
           </div>
@@ -861,7 +811,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                       setAgencyModalMode('external');
                       setNewAgencyTypeId('');
                       setNewAgencyCompany('');
-                      setNewAgencyEscalation(true);
                       setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
                       setShowAddAgency(true);
                     }}
@@ -875,7 +824,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                       setAgencyModalMode('internal');
                       setNewAgencyTypeId('');
                       setNewAgencyCompany('');
-                      setNewAgencyEscalation(true);
                       setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
                       setShowAddAgency(true);
                     }}
@@ -906,7 +854,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                       setAgencyModalMode('external');
                       setNewAgencyTypeId('');
                       setNewAgencyCompany('');
-                      setNewAgencyEscalation(true);
                       setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
                       setShowAddAgency(true);
                     }}
@@ -932,9 +879,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                                 {type?.name ?? 'Agency'}
                               </span>
                               <h4 className="text-base font-bold text-text-primary">{agency.company_name}</h4>
-                              <p className="text-xs text-text-secondary mt-0.5">
-                                Escalation: {agency.escalation_enabled ? 'Enabled (L1–L3)' : 'Disabled'}
-                              </p>
                             </div>
                             <button
                               type="button"
@@ -955,9 +899,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                                 <div>
                                   <span className="font-semibold text-text-primary">{c.name}</span>
                                   <span className="text-text-muted ml-1.5">({c.designation})</span>
-                                  <span className="ml-2 rounded-sm bg-border px-1.5 py-0.2 text-[10px] font-medium text-text-secondary">
-                                    L{c.level}
-                                  </span>
                                 </div>
                                 <div className="text-text-secondary flex gap-2">
                                   {c.phone && <span>{c.phone}</span>}
@@ -993,7 +934,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                       setAgencyModalMode('internal');
                       setNewAgencyTypeId('');
                       setNewAgencyCompany('');
-                      setNewAgencyEscalation(true);
                       setNewAgencyContacts([{ name: '', designation: '', level: 1, phone: '', email: '' }]);
                       setShowAddAgency(true);
                     }}
@@ -1092,9 +1032,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                                 </span>
                               </div>
                               <h4 className="text-base font-bold text-text-primary">{agency.company_name}</h4>
-                              <p className="text-xs text-text-secondary mt-0.5">
-                                Escalation: {agency.escalation_enabled ? 'Enabled (L1–L3)' : 'Disabled'}
-                              </p>
                             </div>
                             <button
                               type="button"
@@ -1115,9 +1052,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                                 <div>
                                   <span className="font-semibold text-text-primary">{c.name}</span>
                                   <span className="text-text-muted ml-1.5">({c.designation})</span>
-                                  <span className="ml-2 rounded-sm bg-border px-1.5 py-0.2 text-[10px] font-medium text-text-secondary">
-                                    L{c.level}
-                                  </span>
                                 </div>
                                 <div className="text-text-secondary flex gap-2">
                                   {c.phone && <span>{c.phone}</span>}
@@ -1185,7 +1119,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                 projectId={projectId}
                 roomId={wizardRoomId || rooms[0]?.id}
                 onRoomChange={(newId) => setWizardRoomId(newId)}
-                onFinish={() => setCurrentStep(5)}
+                onFinish={() => router.push(`/projects/${projectId}`)}
                 isWizard={true}
               />
             )}
@@ -1200,107 +1134,12 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
               </button>
               <button
                 type="button"
-                onClick={() => setCurrentStep(5)}
+                onClick={() => router.push(`/projects/${projectId}`)}
                 className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-accent-hover transition-colors"
               >
-                Next: Escalation &amp; Terms →
+                Complete Setup &amp; Go to Project →
               </button>
             </div>
-          </div>
-        )}
-
-        {/* ───────────────────────── ESCALATION & TERMS STEP ───────────────────────── */}
-        {currentStep === 5 && (
-          <div className="rounded-2xl border border-border bg-surface p-6 shadow-xs">
-            <h2 className="text-base font-semibold text-text-primary mb-1">
-              Step 5: Escalation Policy &amp; Terms
-            </h2>
-            <p className="text-xs text-text-secondary mb-4">
-              Configure reminder thresholds and general disclaimer terms for site visit reports.
-            </p>
-
-            <form onSubmit={handleFinishSetup} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-text-secondary mb-1">
-                    Escalate to L2 after (reminders)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={l2After}
-                    onChange={(e) => setL2After(parseInt(e.target.value, 10))}
-                    className="block w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-base font-medium focus:border-accent"
-                  />
-                  <p className="mt-1 text-[11px] text-text-muted">
-                    Reminders 1..N go to L1 (Site Engineer).
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-text-secondary mb-1">
-                    Escalate to L3 after (reminders)
-                  </label>
-                  <input
-                    type="number"
-                    min={l2After + 1}
-                    required
-                    value={l3After}
-                    onChange={(e) => setL3After(parseInt(e.target.value, 10))}
-                    className="block w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-base font-medium focus:border-accent"
-                  />
-                  <p className="mt-1 text-[11px] text-text-muted">
-                    Reminders above this go to L3 (Owner/Director).
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-text-secondary mb-1">
-                  CC Management (Super Admins)
-                </label>
-                <select
-                  value={mgmtCcLevel}
-                  onChange={(e) => setMgmtCcLevel(parseInt(e.target.value, 10))}
-                  className="block w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm focus:border-accent"
-                >
-                  <option value={1}>Always (Level 1 and above)</option>
-                  <option value={2}>From Level 2 and above</option>
-                  <option value={3}>Level 3 escalations only (Default)</option>
-                  <option value={4}>Never CC management</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-text-secondary mb-1">
-                  General Terms &amp; Disclaimer
-                </label>
-                <textarea
-                  rows={6}
-                  value={termsText}
-                  onChange={(e) => setTermsText(e.target.value)}
-                  className="block w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-xs font-mono focus:border-accent"
-                />
-              </div>
-
-              <div className="flex justify-between pt-4 border-t border-border">
-                <button
-                  type="button"
-                  onClick={() => setCurrentStep(4)}
-                  className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-surface-alt transition-colors"
-                >
-                  ← Back
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-accent-hover transition-colors"
-                >
-                  {saving ? 'Saving…' : 'Complete Setup & Go to Project →'}
-                </button>
-              </div>
-            </form>
           </div>
         )}
 
@@ -1437,19 +1276,6 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                   />
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="escToggle"
-                    checked={newAgencyEscalation}
-                    onChange={(e) => setNewAgencyEscalation(e.target.checked)}
-                    className="rounded text-accent focus:ring-accent"
-                  />
-                  <label htmlFor="escToggle" className="text-xs text-text-primary">
-                    Enable structured escalation for this agency
-                  </label>
-                </div>
-
                 {/* Contacts */}
                 <div className="border-t border-border pt-3">
                   <div className="flex items-center justify-between mb-2">
@@ -1496,20 +1322,7 @@ export default function SetupWizardPage({ params }: { params: Promise<{ projectI
                         />
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2">
-                        <select
-                          value={c.level}
-                          onChange={(e) => {
-                            const updated = [...newAgencyContacts];
-                            updated[idx].level = parseInt(e.target.value, 10) as 1 | 2 | 3;
-                            setNewAgencyContacts(updated);
-                          }}
-                          className="rounded-md border border-border bg-surface px-1 py-1 text-xs"
-                        >
-                          <option value={1}>L1 (Site)</option>
-                          <option value={2}>L2 (Manager)</option>
-                          <option value={3}>L3 (Owner)</option>
-                        </select>
+                      <div className="grid grid-cols-2 gap-2">
                         <input
                           type="tel"
                           placeholder="Phone"

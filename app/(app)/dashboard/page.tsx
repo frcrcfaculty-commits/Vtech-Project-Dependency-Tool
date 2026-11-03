@@ -17,7 +17,6 @@ interface DashboardSection {
   project: DashboardProject;
   pending: number;
   closedThisWeek: number;
-  escalated: number;
   oldest: number | null;
   byAgency: [string, number][];
 }
@@ -89,7 +88,6 @@ export default function PortfolioDashboardPage() {
 
   const sections = data?.sections ?? [];
   const totalPending = sections.reduce((sum, s) => sum + s.pending, 0);
-  const totalEscalated = sections.reduce((sum, s) => sum + s.escalated, 0);
   const totalClosedWeek = sections.reduce((sum, s) => sum + s.closedThisWeek, 0);
 
   return (
@@ -123,7 +121,7 @@ export default function PortfolioDashboardPage() {
         )}
 
         {/* Portfolio Summary Metrics */}
-        <div className="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="rounded-2xl border border-border bg-surface p-4 shadow-xs">
             <p className="text-xs font-semibold text-text-secondary">Active Projects</p>
             <p className="text-2xl font-bold text-text-primary mt-1">{sections.length}</p>
@@ -134,12 +132,6 @@ export default function PortfolioDashboardPage() {
             <p className="text-xs font-semibold text-text-secondary">Total Pending</p>
             <p className="text-2xl font-bold text-warning mt-1">{totalPending}</p>
             <p className="text-[11px] text-text-muted mt-0.5">Open contractor items</p>
-          </div>
-
-          <div className="rounded-2xl border border-border bg-surface p-4 shadow-xs">
-            <p className="text-xs font-semibold text-text-secondary">Escalated (L2+)</p>
-            <p className="text-2xl font-bold text-danger mt-1">{totalEscalated}</p>
-            <p className="text-[11px] text-text-muted mt-0.5">Chased multiple times</p>
           </div>
 
           <div className="rounded-2xl border border-border bg-surface p-4 shadow-xs">
@@ -157,7 +149,6 @@ export default function PortfolioDashboardPage() {
                 <tr className="bg-surface-alt border-b border-border">
                   <th className="p-3.5 font-bold text-text-secondary">Project</th>
                   <th className="p-3.5 font-bold text-text-secondary text-center">Pending</th>
-                  <th className="p-3.5 font-bold text-text-secondary text-center">Escalated</th>
                   <th className="p-3.5 font-bold text-text-secondary text-center">Closed (7d)</th>
                   <th className="p-3.5 font-bold text-text-secondary text-center">Oldest Open</th>
                   <th className="p-3.5 font-bold text-text-secondary">Last Visit</th>
@@ -167,7 +158,7 @@ export default function PortfolioDashboardPage() {
               <tbody className="divide-y divide-border/60">
                 {sections.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-xs text-text-muted">
+                    <td colSpan={6} className="p-8 text-center text-xs text-text-muted">
                       No active projects to display in portfolio.
                     </td>
                   </tr>
@@ -191,16 +182,6 @@ export default function PortfolioDashboardPage() {
                         >
                           {s.pending}
                         </span>
-                      </td>
-
-                      <td className="p-3.5 text-center">
-                        {s.escalated > 0 ? (
-                          <span className="inline-block rounded-md bg-danger-light text-danger px-2 py-0.5 font-bold">
-                            {s.escalated}
-                          </span>
-                        ) : (
-                          <span className="text-text-muted">0</span>
-                        )}
                       </td>
 
                       <td className="p-3.5 text-center font-medium text-text-secondary">

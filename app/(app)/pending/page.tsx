@@ -7,7 +7,6 @@ import { supabaseBrowser } from '@/lib/client/supabase';
 import { compressImageToWebP } from '@/lib/client/image';
 import { todayIST } from '@/lib/client/date';
 import { AppHeader } from '@/components/app-header';
-import { getEscalationLevel, isEscalated } from '@/lib/client/escalation';
 
 interface PendingItem {
   id: string;
@@ -128,7 +127,6 @@ export default function PendingPage() {
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [agencyTypeFilter, setAgencyTypeFilter] = useState<string>('all');
   const [agencyFilter, setAgencyFilter] = useState<string>('all');
-  const [escalatedOnly, setEscalatedOnly] = useState<boolean>(false);
   const [ageFilter, setAgeFilter] = useState<'all' | '7' | '14' | '30'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -319,12 +317,6 @@ export default function PendingPage() {
         return false;
       }
 
-      // Escalated only
-      const l2After = item.projects?.l2_after ?? 3;
-      if (escalatedOnly && !isEscalated(item.reminder_count, l2After)) {
-        return false;
-      }
-
       // Age filter
       if (ageFilter !== 'all') {
         if (!item.first_raised_on) return false;
@@ -357,7 +349,7 @@ export default function PendingPage() {
 
       return true;
     });
-  }, [items, getItemLane, activeLane, projectFilter, agencyTypeFilter, agencyFilter, escalatedOnly, ageFilter, searchQuery]);
+  }, [items, getItemLane, activeLane, projectFilter, agencyTypeFilter, agencyFilter, ageFilter, searchQuery]);
 
   // Copy plain text status note for client-pending items
   const handleCopyClientStatusNote = () => {
@@ -438,7 +430,6 @@ export default function PendingPage() {
       items: PendingItem[];
     }[];
     totalItems: number;
-    escalatedCount: number;
   }
 
   const groupedData: GroupedProject[] = useMemo(() => {
@@ -459,15 +450,11 @@ export default function PendingPage() {
           project: projData,
           agencies: [],
           totalItems: 0,
-          escalatedCount: 0,
         });
       }
 
       const pGroup = projMap.get(projId)!;
       pGroup.totalItems++;
-      if (isEscalated(item.reminder_count, projData.l2_after ?? 3)) {
-        pGroup.escalatedCount++;
-      }
 
       const agencyIdKey = item.agency_id ?? 'unassigned';
       let aGroup = pGroup.agencies.find((a) => (a.agency?.id ?? 'unassigned') === agencyIdKey);
@@ -482,7 +469,7 @@ export default function PendingPage() {
       aGroup.items.push(item);
     }
 
-    return Array.from(projMap.values()).sort((a, b) => b.escalatedCount - a.escalatedCount || a.project.name.localeCompare(b.project.name));
+    return Array.from(projMap.values()).sort((a, b) => b.totalItems - a.totalItems || a.project.name.localeCompare(b.project.name));
   }, [filteredItems, contactsByAgency]);
 
   // Selection handlers
@@ -720,7 +707,6 @@ export default function PendingPage() {
   };
 
   const totalPending = items.length;
-  const totalEscalated = items.filter((i) => isEscalated(i.reminder_count, i.projects?.l2_after ?? 3)).length;
   const totalProjects = filterOptions.projects.length;
 
   return (
@@ -768,14 +754,10 @@ export default function PendingPage() {
           </div>
 
           {/* Quick Metrics Cards */}
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
             <div className="rounded-xl border border-border bg-surface-alt/60 p-2.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Total Pending</span>
               <p className="mt-0.5 text-lg font-extrabold text-text-primary">{totalPending}</p>
-            </div>
-            <div className="rounded-xl border border-border bg-surface-alt/60 p-2.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Escalated (L2/L3)</span>
-              <p className="mt-0.5 text-lg font-extrabold text-danger">{totalEscalated}</p>
             </div>
             <div className="rounded-xl border border-border bg-surface-alt/60 p-2.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Active Projects</span>
@@ -980,7 +962,7 @@ export default function PendingPage() {
             </div>
           </div>
 
-          {/* Secondary Row: Age Pills + Escalated Checkbox */}
+          {/* Secondary Row: Age Pills */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-2.5">
             <div className="flex flex-wrap items-center gap-3">
               {/* Age Filter */}
@@ -1001,17 +983,6 @@ export default function PendingPage() {
                   </button>
                 ))}
               </div>
-
-              {/* Escalated Toggle */}
-              <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-text-primary">
-                <input
-                  type="checkbox"
-                  checked={escalatedOnly}
-                  onChange={(e) => setEscalatedOnly(e.target.checked)}
-                  className="rounded border-border text-danger focus:ring-danger"
-                />
-                <span className={escalatedOnly ? 'text-danger font-bold' : ''}>Escalated only (L2/L3)</span>
-              </label>
             </div>
 
             {activeLane !== 'client' && (
@@ -1071,7 +1042,6 @@ export default function PendingPage() {
                   setProjectFilter('all');
                   setAgencyTypeFilter('all');
                   setAgencyFilter('all');
-                  setEscalatedOnly(false);
                   setAgeFilter('all');
                   setSearchQuery('');
                 }}
@@ -1120,11 +1090,6 @@ export default function PendingPage() {
                         </div>
                         <span className="text-[11px] text-text-muted">
                           {pGroup.totalItems} pending {pGroup.totalItems === 1 ? 'item' : 'items'}
-                          {pGroup.escalatedCount > 0 && (
-                            <span className="ml-1 text-danger font-semibold">
-                              · {pGroup.escalatedCount} escalated
-                            </span>
-                          )}
                         </span>
                       </div>
                     </div>
@@ -1215,10 +1180,6 @@ export default function PendingPage() {
                             {aGroup.items.map((item) => {
                               const isSelected = selectedItemIds.has(item.id);
                               const daysOpen = getDaysOpen(item.first_raised_on);
-                              const l2After = item.projects?.l2_after ?? 3;
-                              const l3After = item.projects?.l3_after ?? 6;
-                              const level = getEscalationLevel(item.reminder_count, l2After, l3After);
-                              const escalated = isEscalated(item.reminder_count, l2After);
 
                               return (
                                 <div
@@ -1242,19 +1203,6 @@ export default function PendingPage() {
                                       <div className="flex flex-wrap items-center gap-1.5">
                                         <span className="rounded bg-surface-alt px-1.5 py-0.5 text-[10px] font-bold text-text-secondary border border-border/60">
                                           {item.rooms?.floors?.label ?? 'Floor'} · {item.rooms?.name ?? 'Room'}
-                                        </span>
-
-                                        {/* Escalation Level Badge */}
-                                        <span
-                                          className={`rounded px-1.5 py-0.2 text-[10px] font-bold uppercase tracking-wider ${
-                                            level === 3
-                                              ? 'bg-danger/15 text-danger'
-                                              : level === 2
-                                              ? 'bg-amber-500/15 text-amber-700'
-                                              : 'bg-surface-alt text-text-muted'
-                                          }`}
-                                        >
-                                          {level === 1 ? 'L1 · First notice' : `L${level} Escalation`}
                                         </span>
 
                                         {/* Age badge */}
