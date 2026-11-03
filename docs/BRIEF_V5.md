@@ -73,13 +73,13 @@ and **Send Email · Send WhatsApp**. A category with 0 pending items shows "Noth
 
 **B2 — API**
 - `GET /api/projects/{projectId}/reminder-categories` →
-  `[{ key, label, itemCount, recipients: [{ agencyTypeId, name, defaultChecked, agencies: [{ id, companyName, contacts: [{ name, designation, email, phone }] }] }] }]`
+  `[{ key, label, colour, itemCount, recipients: [{ agencyTypeId, name, internal, defaultChecked, agencies: [{ id, companyName, contacts: [{ name, designation, email, phone }] }] }] }]`
   (recipients only for agencies the project actually has; a group with no agency in the project is returned with `agencies: []`).
 - `POST /api/projects/{projectId}/reminder-rounds` body `{ category: string, agencyTypeIds: string[], channel: 'email'|'whatsapp', preview?: boolean }`
-  → `preview: true`: returns `{ email: { to, cc, subject, text, html } | null, whatsapp: { to, text } | null, itemCount }` without saving.
+  → `preview: true`: returns `{ preview: true, itemCount, drafts: [{ agency, email, whatsapp }], email, whatsapp, warnings }` without saving (`email`/`whatsapp` = first draft). **Built by Claude (`lib/reminders.ts`).**
   → otherwise: opens an office round (`start_office_followup`), drafts **one message per selected agency** listing **all items of the category**
   (not only items assigned to that agency), all active contacts of that agency as recipients, then sends exactly like today:
-  email → `sendDispatch` (Gmail compose link / Gmail API / dryrun), WhatsApp → wa.me links; returns `{ visitId, dispatches:[{id, agency, channel, status, links?}], warnings }`.
+  email → `sendDispatch` (Gmail compose link / Gmail API / dryrun), WhatsApp → wa.me links; returns `{ preview: false, visitId, itemCount, dispatches: [{ id, agency, channel, outcome: { status: 'sent', ref } | { status: 'needs_confirmation', links: [{label,url}] } | { status: 'failed', error } }], warnings }`.
   Reminder counts increase once per item per round (existing `mark_dispatch_sent` rule).
 - Old `POST /api/projects/{id}/reminders` keeps working (no breaking change) until the UI no longer calls it.
 

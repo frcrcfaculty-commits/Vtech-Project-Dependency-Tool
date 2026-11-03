@@ -10,29 +10,27 @@ const item = (over: Partial<ReportItem> = {}): ReportItem => ({
 });
 
 const base = (items: ReportItem[]): ReportInput => ({
-  project: { name: 'Shah Residence', clientName: 'Mr Shah', terms: 'General terms and attention\n1. Two to four days.', policy: { l2After: 3, l3After: 6, mgmtCcLevel: 3 } },
+  project: { name: 'Shah Residence', clientName: 'Mr Shah', terms: 'General terms and attention\n1. Two to four days.' },
   visitDate: '2026-10-31',
   agency: {
-    companyName: 'Sparks Electricals', typeName: 'Electrician', escalationEnabled: true,
+    companyName: 'Sparks Electricals', typeName: 'Electrician',
     contacts: [
-      { id: 'a', name: 'Ramesh', designation: 'Supervisor', level: 1, email: 'ramesh@sparks.in', phone: '98765 43210', active: true },
-      { id: 'b', name: 'Mr Kapoor', designation: 'Owner', level: 3, email: 'owner@sparks.in', phone: '+91 98200 00000', active: true },
+      { id: 'a', name: 'Ramesh', designation: 'Supervisor', email: 'ramesh@sparks.in', phone: '98765 43210', active: true },
+      { id: 'b', name: 'Mr Kapoor', designation: 'Owner', email: 'owner@sparks.in', phone: '+91 98200 00000', active: true },
     ],
   },
   pm: { name: 'Amit PM', email: 'amit@vtechpl.com', phone: '9000000000' },
-  management: [{ name: 'Vipul Shah', email: 'vipul@vtechpl.com' }],
   items,
 });
 
 describe('buildAgencyReport', () => {
-  it('first reminder: L1 recipient, no management CC, items sorted by floor/room/seq', () => {
+  it('v5: every active contact receives it, no CC, items sorted by floor/room/seq', () => {
     const r = buildAgencyReport(base([
       item({ itemId: 'b', floorLabel: '13th Floor', floorSort: 13 }),
       item({ itemId: 'a', seq: 4, text: 'Ceiling fan not yet installed.' }),
       item({ itemId: 'c' }),
     ]));
-    expect(r.level).toBe(1);
-    expect(r.email!.to.map((p) => p.email)).toEqual(['ramesh@sparks.in']);
+    expect(r.email!.to.map((p) => p.email)).toEqual(['ramesh@sparks.in', 'owner@sparks.in']);
     expect(r.email!.cc).toEqual([]);
     expect(r.items.map((i) => i.itemId)).toEqual(['c', 'a', 'b']);
     expect(r.items.every((i) => i.reminderNo === 1)).toBe(true);
@@ -40,13 +38,31 @@ describe('buildAgencyReport', () => {
     expect(r.email!.text).toContain('General terms and attention');
   });
 
-  it('7th reminder escalates to L3 owner, CCs junior + Vipul, flags subject', () => {
-    const r = buildAgencyReport(base([item({ reminderCount: 6 }), item({ itemId: 'x', reminderCount: 0 })]));
-    expect(r.level).toBe(3);
-    expect(r.email!.to.map((p) => p.email)).toEqual(['owner@sparks.in']);
-    expect(r.email!.cc.map((p) => p.email)).toEqual(['ramesh@sparks.in', 'vipul@vtechpl.com']);
-    expect(r.email!.subject.startsWith('[ESCALATION L3]')).toBe(true);
-    expect(r.items.find((i) => i.itemId === 'x')!.level).toBe(1);
+  it('v5: no escalation and no emoji, even after many reminders', () => {
+    const r = buildAgencyReport(base([item({ reminderCount: 9 }), item({ itemId: 'x', reminderCount: 0 })]));
+    expect(r.email!.cc).toEqual([]);
+    expect(r.email!.subject).not.toMatch(/ESCALATION/i);
+    expect(r.email!.html).not.toMatch(/escalation/i);
+    expect(r.whatsapp!.text).not.toMatch(/escalation/i);
+    const pict = /\p{Extended_Pictographic}/u;
+    expect(pict.test(r.whatsapp!.text)).toBe(false);
+    expect(pict.test(r.email!.text)).toBe(false);
+    expect(pict.test(r.email!.subject)).toBe(false);
+    expect(r.items.find((i) => i.itemId === 'x')!.reminderNo).toBe(1);
+  });
+
+  it('v5: inactive contacts are skipped', () => {
+    const input = base([item()]);
+    input.agency.contacts = input.agency.contacts.map((c, n) => ({ ...c, active: n === 0 }));
+    expect(buildAgencyReport(input).email!.to.map((p) => p.email)).toEqual(['ramesh@sparks.in']);
+  });
+
+  it('v5: category wording lists items and who they wait on', () => {
+    const r = buildAgencyReport({ ...base([item({ owner: 'Carpenter' })]), occasion: 'follow_up', category: 'All dependencies' });
+    expect(r.email!.subject).toContain('1 pending item – All dependencies');
+    expect(r.email!.text).toContain('are still pending (All dependencies)');
+    expect(r.email!.text).toContain('waiting on Carpenter');
+    expect(r.whatsapp!.text).toContain('All dependencies, status as of');
   });
 
   it('escapes HTML in user-entered text', () => {
@@ -99,9 +115,9 @@ describe('channels', () => {
 });
 
 describe('digest', () => {
-  it('summarises pending, escalated, closed-this-week, oldest', () => {
+  it('summarises pending, reminded, closed-this-week, oldest', () => {
     const d = buildDigest(
-      [{ id: 'p1', name: 'Shah Residence', l2After: 3, l3After: 6, lastVisit: '2026-10-31' }],
+      [{ id: 'p1', name: 'Shah Residence', lastVisit: '2026-10-31' }],
       [
         { projectId: 'p1', agency: 'Electrician – Sparks', status: 'pending', firstRaisedOn: '2026-10-01', completedOn: null, reminderCount: 4 },
         { projectId: 'p1', agency: 'Electrician – Sparks', status: 'pending', firstRaisedOn: '2026-10-24', completedOn: null, reminderCount: 1 },
@@ -110,7 +126,8 @@ describe('digest', () => {
       '2026-11-02',
     );
     const s = d.sections[0];
-    expect([s.pending, s.escalated, s.closedThisWeek, s.oldest]).toEqual([2, 1, 1, 32]);
+    expect([s.pending, s.reminded, s.closedThisWeek, s.oldest]).toEqual([2, 2, 1, 32]);
+    expect(d.text).not.toMatch(/escalat/i);
     expect(daysOpen('2026-10-24', '2026-10-31')).toBe(7);
   });
 });
@@ -146,16 +163,16 @@ describe('internal team reminders', () => {
 describe('v4 polite wording', () => {
   it('greets the agency and its team, thanks them, asks kindly; internal stays short', () => {
     const r = buildAgencyReport({ ...base([item({ note: 'Work pending from electrician' })]), occasion: 'follow_up' });
-    expect(r.email!.text).toContain('Dear Ramesh and the Sparks Electricals team,');
+    expect(r.email!.text).toContain('Dear Ramesh, Mr Kapoor and the Sparks Electricals team,');
     expect(r.email!.text).toContain('Greetings from VTech Technologies');
     expect(r.email!.text).toContain('We would be grateful if you could take these up');
     expect(r.email!.text).toContain('Warm regards,');
     expect(r.email!.text).toContain('Work pending from electrician');
     expect(r.email!.text).not.toContain('at the earliest');
     expect(r.email!.html).toContain('the Sparks Electricals team');
-    expect(r.whatsapp!.text.startsWith('Hello Ramesh, greetings from VTech')).toBe(true);
+    expect(r.whatsapp!.text.startsWith('Hello Ramesh, Mr Kapoor, greetings from VTech.')).toBe(true);
     const i = buildAgencyReport({ ...base([item()]), agency: { ...base([]).agency, internal: true } });
-    expect(i.email!.text).toContain('Dear Ramesh,');
+    expect(i.email!.text).toContain('Dear Ramesh, Mr Kapoor,');
     expect(i.email!.text).not.toContain('Greetings from VTech');
   });
 });

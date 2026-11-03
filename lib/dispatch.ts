@@ -3,8 +3,7 @@
 
 import type { Me } from './auth';
 import { HttpError } from './auth';
-import type { Contact, Level } from './escalation';
-import { buildAgencyReport, type Person, type ReportItem } from './report';
+import { buildAgencyReport, type BuiltReport, type Person, type ReportItem } from './report';
 import { gmailComposeUrl, sendViaGmailApi, type OutgoingEmail } from './channels/email';
 import { sendMetaTemplate, waLink } from './channels/whatsapp';
 import { env } from './env';
@@ -19,13 +18,15 @@ interface ItemRow {
   project_dependencies: One<{ text: string; seq: number }>;
 }
 interface AgencyRow {
-  id: string; company_name: string; escalation_enabled: boolean;
+  id: string; company_name: string;
   agency_types: One<{ name: string; internal: boolean }>;
-  agency_contacts: { id: string; name: string; designation: string; level: number; email: string | null; phone: string | null; active: boolean }[];
+  agency_contacts: { id: string; name: string; designation: string | null; email: string | null; phone: string | null; active: boolean }[];
 }
 
+export type Channel = 'email' | 'whatsapp';
+
 export interface PrepareResult {
-  dispatches: { id: string; agency: string; channel: 'email' | 'whatsapp'; level: Level; itemCount: number }[];
+  dispatches: { id: string; agency: string; channel: Channel; itemCount: number }[];
   warnings: string[];
 }
 
@@ -43,16 +44,14 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
   if (visit.status === 'draft') throw new HttpError(409, 'Finalize the visit before preparing reminders');
 
   const [{ data: project }, { data: agencies }, { data: items }] = await Promise.all([
-    db.from('projects').select('name, client_name, terms, l2_after, l3_after, mgmt_cc_level').eq('id', visit.project_id).single(),
-    db.from('agencies').select('id, company_name, escalation_enabled, agency_types(name, internal), agency_contacts(id, name, designation, level, email, phone, active)')
+    db.from('projects').select('name, client_name, terms').eq('id', visit.project_id).single(),
+    db.from('agencies').select('id, company_name, agency_types(name, internal), agency_contacts(id, name, designation, email, phone, active)')
       .eq('project_id', visit.project_id),
     db.from('dependency_items')
       .select('id, agency_id, first_raised_on, reminder_count, note, stuck_reason, rooms!inner(name, sort, floors!inner(label, sort)), project_dependencies!inner(text, seq)')
       .eq('project_id', visit.project_id).eq('status', 'pending'),
   ]);
   if (!project) throw new HttpError(404, 'Project not found');
-
-  const { data: mgmt } = await db.rpc('management_contacts');
 
   const { data: existing } = await db.from('dispatches').select('agency_id, channel, status').eq('visit_id', visitId);
   const alreadySent = new Set((existing ?? []).filter((d) => d.status === 'sent').map((d) => `${d.agency_id}:${d.channel}`));
@@ -83,40 +82,47 @@ export async function prepareDispatches(db: Db, me: Me, visitId: string, opts: P
     const typeName = one(a.agency_types).name;
     // Items waiting on the client are reported, never chased by reminder (VTech's rule).
     if (typeName === 'Client') { clientSkipped += list.length; continue; }
-    const contacts: Contact[] = a.agency_contacts.map((c) => ({ ...c, level: c.level as Level }));
     const report = buildAgencyReport({
-      project: {
-        name: project.name, clientName: project.client_name, terms: project.terms,
-        policy: { l2After: project.l2_after, l3After: project.l3_after, mgmtCcLevel: project.mgmt_cc_level },
-      },
+      project: { name: project.name, clientName: project.client_name, terms: project.terms },
       visitDate: visit.visit_date,
       occasion: visit.kind === 'office' ? 'follow_up' : 'site_visit',
-      agency: { companyName: a.company_name, typeName, escalationEnabled: a.escalation_enabled, contacts, internal: !!one(a.agency_types).internal },
+      agency: { companyName: a.company_name, typeName, contacts: a.agency_contacts, internal: !!one(a.agency_types).internal },
       pm: { name: me.fullName, email: me.email, phone: me.phone },
-      management: ((mgmt ?? []) as { full_name: string; email: string }[]).map((m) => ({ name: m.full_name, email: m.email })),
       items: list,
     });
     warnings.push(...report.warnings);
 
-    const drafts: { channel: 'email' | 'whatsapp'; recipients: { to: Person[]; cc: Person[] }; subject: string | null; text: string; html: string | null }[] = [];
-    if (report.email) drafts.push({ channel: 'email', recipients: { to: report.email.to, cc: report.email.cc }, subject: report.email.subject, text: report.email.text, html: report.email.html });
-    if (report.whatsapp) drafts.push({ channel: 'whatsapp', recipients: { to: report.whatsapp.to, cc: [] }, subject: null, text: report.whatsapp.text, html: null });
-
-    for (const d of drafts) {
+    for (const d of draftsOf(report)) {
       if (alreadySent.has(`${a.id}:${d.channel}`)) { warnings.push(`${a.company_name} ${d.channel} already sent for this visit; not re-drafted.`); continue; }
-      const { data: row, error } = await db.from('dispatches').insert({
-        project_id: visit.project_id, visit_id: visitId, agency_id: a.id, channel: d.channel, level: report.level,
-        recipients: d.recipients, subject: d.subject, body_text: d.text, body_html: d.html,
-      }).select('id').single();
-      if (error || !row) throw new HttpError(500, `Could not save draft: ${error?.message}`);
-      const { error: diErr } = await db.from('dispatch_items').insert(
-        report.items.map((i) => ({ dispatch_id: row.id, item_id: i.itemId, reminder_no: i.reminderNo, level: i.level })));
-      if (diErr) throw new HttpError(500, `Could not save draft items: ${diErr.message}`);
-      result.dispatches.push({ id: row.id, agency: `${typeName} – ${a.company_name}`, channel: d.channel, level: report.level, itemCount: list.length });
+      const id = await saveDraft(db, { projectId: visit.project_id, visitId, agencyId: a.id }, d, report);
+      result.dispatches.push({ id, agency: `${typeName} – ${a.company_name}`, channel: d.channel, itemCount: list.length });
     }
   }
   if (clientSkipped) warnings.push(`${clientSkipped} item${clientSkipped === 1 ? '' : 's'} waiting on the client — not sent as reminders (shown in reports).`);
   return result;
+}
+
+export interface Draft { channel: Channel; recipients: { to: Person[]; cc: Person[] }; subject: string | null; text: string; html: string | null }
+
+/** The email and/or WhatsApp drafts a built report yields (a channel is missing when no contact has it). */
+export function draftsOf(report: BuiltReport): Draft[] {
+  const drafts: Draft[] = [];
+  if (report.email) drafts.push({ channel: 'email', recipients: { to: report.email.to, cc: report.email.cc }, subject: report.email.subject, text: report.email.text, html: report.email.html });
+  if (report.whatsapp) drafts.push({ channel: 'whatsapp', recipients: { to: report.whatsapp.to, cc: [] }, subject: null, text: report.whatsapp.text, html: null });
+  return drafts;
+}
+
+/** Saves one draft + its items. dispatches.level / dispatch_items.level are legacy NOT NULL columns: always 1 since v5. */
+export async function saveDraft(db: Db, at: { projectId: string; visitId: string; agencyId: string }, d: Draft, report: BuiltReport): Promise<string> {
+  const { data: row, error } = await db.from('dispatches').insert({
+    project_id: at.projectId, visit_id: at.visitId, agency_id: at.agencyId, channel: d.channel, level: 1,
+    recipients: d.recipients, subject: d.subject, body_text: d.text, body_html: d.html,
+  }).select('id').single();
+  if (error || !row) throw new HttpError(500, `Could not save draft: ${error?.message}`);
+  const { error: diErr } = await db.from('dispatch_items').insert(
+    report.items.map((i) => ({ dispatch_id: row.id, item_id: i.itemId, reminder_no: i.reminderNo, level: 1 })));
+  if (diErr) throw new HttpError(500, `Could not save draft items: ${diErr.message}`);
+  return row.id as string;
 }
 
 export type SendOutcome =
