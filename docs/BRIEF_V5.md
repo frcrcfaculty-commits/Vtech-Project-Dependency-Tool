@@ -1,6 +1,6 @@
 # Brief v5 — agencies from "HansalV2", reminder categories, no escalation (VTech, 2026-11-03)
 
-Lead: Claude (spec + review). Builders: **Antigravity** = all UI (U1–U6). **Gemini** = backend (B1–B3).
+Lead: Claude (spec, review, B1 migration). Builders: **Antigravity** = all UI (U1–U6). **Gemini** = backend B2–B3 (no repo access: works from an uploaded context file, returns complete files, Claude commits).
 Live app: https://vtech-hansal.zocomputer.io (Zo Computer; merging to `main` deploys within ~5 min; check `/api/health` sha).
 Source: Google Sheet "Ashutosh Project Status" (https://docs.google.com/spreadsheets/d/1yWx6z6mkbqic78XTSxXg8Oe3wcD-CMYQ1J9dX6Omv08),
 tabs **"HansalV2"** (agency groups, stuck reasons) and **"Reminder Format"** (reminder categories).
@@ -55,21 +55,21 @@ now knows both colours (do not regenerate `supabase/seed/catalogue.sql` — it l
 | Programmer dependency (`programmer`) | pending items waiting on **VTech Programmers** | VTECH Sales · VTECH Installers · VTECH Prog |
 | Only electrical dependency (`electrical`) | pending items waiting on **Electrician** | Electrician |
 | Only carpentry dependency (`carpentry`) | pending items waiting on **Carpenter** | Carpenter |
+| Sales dependency (`sales`) *(added for the magenta colour)* | pending items waiting on **VTECH Sales Team** | VTECH Sales |
 "Waiting on" = the item's assigned agency type, falling back to the step's default agency type when unassigned.
 Default checkbox state per group comes from the table in §3. Each category row has **Preview Email · Preview WhatsApp** (side panel)
 and **Send Email · Send WhatsApp**. A category with 0 pending items shows "Nothing pending" and disabled buttons.
 
 ## Backend contract (Gemini builds; Antigravity codes against it)
-**B1 — migration `supabase/migrations/0010_v5_agencies_reminders.sql`** (+ SQL tests in `tests/sql/10_behaviour_test.sql`, add file to `scripts/test-sql.sh`):
-- `agency_types`: add `active boolean not null default true`, `side text check (side in ('external','internal'))`, `contact_slots int`,
-  `sort` reused for display order. Insert `PMC / Architect / Client person` and `VTECH Sales Team`. Set active/side/slots per §3; all others inactive.
-- `agency_contacts`: add `designation text` (nullable). AV Vendor is also retired.
-- Remap `product_steps.default_agency_type_id` and `step_reasons.agency_type` per the table above.
-- `reminder_categories (key text pk, label text, sort int, item_agency_type_id uuid null references agency_types)` — null = all items.
-- `reminder_category_recipients (category_key text references reminder_categories, agency_type_id uuid references agency_types, default_checked boolean, sort int, primary key (category_key, agency_type_id))`.
-- RLS: read for authenticated, write for admins. Seed the 5 categories and their recipients exactly as in §7/§3.
-- View `reminder_category_items (security_invoker)`: `project_id, category_key, item_id` for pending items per category rule.
-- Do **not** drop `projects.l2_after/l3_after/mgmt_cc_level`; they become unused.
+**B1 — migration `supabase/migrations/0010_v5_agencies_reminders.sql` — written by Claude (PR `claude/v5-db`), SQL tests pass (116 checks), dry-run on live rolled back cleanly.**
+- `agency_types`: `active boolean`, `contact_slots int` (null = 1 row + "Add contact"); side = the existing `internal` flag. New types
+  `PMC / Architect / Client person` (sort 2) and `VTECH Sales Team` (sort 20, internal). Sort: Client 1, PMC 2, Electrician 3, Carpenter 4, Sales 20, Installers 21, Programmers 22.
+- `agency_contacts.designation` already exists; 0010 makes it optional and defaults `level` to 1.
+- Remap + catalogue colours as above. On live: 0 steps and 0 stuck reasons left on retired types; 5 magenta steps (8 live items moved to Sales), 5 purple steps.
+- `reminder_categories (key, label, sort, item_agency_type_id null = all, colour)` + `reminder_category_recipients (category_key, agency_type_id, default_checked, sort)`, RLS read all / write admins.
+- **6 categories**: the 5 from the sheet + **`sales` "Sales dependency"** (items waiting on VTECH Sales Team = magenta; recipient VTECH Sales Team) so the new colour has its own reminder. Purple steps belong to the Electrician, so they fall under "Only electrical dependency" automatically.
+  Chip colours: installer E06666, programmer F4CCCC, sales FF00FF.
+- View `reminder_category_items (security_invoker)`: `project_id, category_key, item_id, agency_type_id` for `status = 'pending'` items.
 
 **B2 — API**
 - `GET /api/projects/{projectId}/reminder-categories` →
@@ -106,7 +106,7 @@ and **Send Email · Send WhatsApp**. A category with 0 pending items shows "Noth
   **Send WhatsApp** and **Send Email** when the agency has phone/email. Strip any emoji from UI-generated text.
 
 ## Order and dependencies
-1. Gemini: B1 → Hansal pastes 0010 in the Supabase SQL editor → Claude verifies live → B2+B3 merged.
+1. Claude: B1 (done, PR open) → Hansal pastes 0010 in the Supabase SQL editor → Claude verifies live → B2+B3 merged.
 2. Antigravity: U1, U2 (UI parts), U4 immediately; U3, U5, U6 after B1 is live and B2 is on `main`.
 3. Claude reviews each merge: all checks, live click-through at 1280px and 390px, live DB checks.
 
