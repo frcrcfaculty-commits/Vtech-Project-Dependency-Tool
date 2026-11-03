@@ -376,9 +376,17 @@ export default function ProjectRemindersPage({
       const allLinks: { label: string; url: string }[] = [];
       const waDispatchIds: string[] = [];
 
-      (data.dispatches ?? []).forEach((d) => {
-        if (d.links) {
-          allLinks.push(...d.links);
+      interface RawDispatch {
+        id: string;
+        channel: string;
+        links?: { label: string; url: string }[];
+        outcome?: { status?: string; links?: { label: string; url: string }[] };
+      }
+
+      ((data.dispatches ?? []) as unknown as RawDispatch[]).forEach((d) => {
+        const links = d.links || d.outcome?.links;
+        if (links && Array.isArray(links)) {
+          allLinks.push(...links);
         }
         if (d.channel === 'whatsapp' && d.id) {
           waDispatchIds.push(d.id);
