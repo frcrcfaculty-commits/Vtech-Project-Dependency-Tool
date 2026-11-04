@@ -353,7 +353,7 @@ select public.set_item_status((select item_id from public.item_gate where room_p
 select pg_temp.assert((select t.name from public.dependency_items i join public.agencies a on a.id=i.agency_id join public.agency_types t on t.id=a.agency_type_id
   where i.id=(select item_id from public.item_gate where room_product_id=(select id from t_sw) and label='Readiness of cable')) = 'Electrician', 'v4: reason "electrician" points the item at the electrician');
 -- project change log is append-only and needs reason + requester
-insert into public.project_changes (project_id, requested_by, reason, changes) values ((select id from public.projects limit 1), 'Vipul', 'Client renamed', '[{"what":"Client name","from":"a","to":"b"}]');
+insert into public.project_changes (project_id, requested_by, reason, reference_type, reference, changes) values ((select id from public.projects limit 1), 'Vipul', 'Client renamed because the family registered the flat under the son''s name', 'call', 'Vipul call 3 Nov 11am', '[{"what":"Client name","from":"a","to":"b"}]');
 select pg_temp.assert((select count(*) from public.project_changes) = 1, 'v4: change logged');
 do $$ begin
   insert into public.project_changes (project_id, requested_by, reason) values ((select id from public.projects limit 1), 'Vipul', ' ');
@@ -361,7 +361,7 @@ do $$ begin
 exception when check_violation then raise notice 'ok - change needs a reason';
 end $$;
 update public.project_changes set reason = 'x';
-select pg_temp.assert((select reason from public.project_changes limit 1) = 'Client renamed', 'v4: change log cannot be edited');
+select pg_temp.assert((select reason from public.project_changes limit 1) like 'Client renamed%', 'v4: change log cannot be edited');
 update public.projects set status = 'finished' where id = (select id from public.projects limit 1);
 select pg_temp.assert((select status from public.projects limit 1) = 'finished', 'v4: projects can be finished');
 update public.projects set status = 'active';
@@ -422,7 +422,7 @@ select pg_temp.assert((select count(*) from public.product_steps s join public.a
 select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where s.sheet_colour = '9900FF' and t.name = 'Electrician') = 5, 'v5: 5 purple steps belong to the electrician');
 select pg_temp.assert((select count(*) from public.reminder_categories) = 6, 'v5: 6 reminder categories (Reminder Format tab + sales)');
 select pg_temp.assert((select string_agg(c.key || ':' || t.name || ':' || r.default_checked, ',' order by c.sort, r.sort) from public.reminder_category_recipients r join public.reminder_categories c on c.key = r.category_key join public.agency_types t on t.id = r.agency_type_id where c.key in ('all', 'electrical'))
-  = 'all:Client:false,all:PMC / Architect / Client person:true,all:VTECH Sales Team:true,all:VTech Installers:true,all:VTech Programmers:true,electrical:Electrician:true', 'v5: recipients and defaults from HansalV2 col C');
+  = 'all:Client:false,all:PMC / Architect / Client person:true,all:Electrician:true,all:Carpenter:true,all:VTECH Sales Team:true,all:VTech Installers:true,all:VTech Programmers:true,electrical:Electrician:true', 'v5+v7: recipients and defaults (HansalV2 col C + sketch)');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 set role authenticated;
 insert into public.projects (name, client_name) values ('TEST – v5', 'v5') ;
@@ -471,6 +471,41 @@ reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
 set role authenticated;
 select pg_temp.assert((select count(*) from public.contact_followups) = 0, 'v6: outsider sees no follow-ups');
+reset role;
+
+-- ── v7 (0012): reminder sections, change requests, BOQ history ──
+reset role;
+select pg_temp.assert((select string_agg(key || ':' || section, ',' order by sort) from public.reminder_categories)
+  = 'all:all,installer:vtech,programmer:vtech,electrical:other,carpentry:other,sales:vtech', 'v7: categories grouped in 3 sections');
+select pg_temp.assert((select string_agg(t.name, ',' order by r.sort) from public.reminder_category_recipients r join public.agency_types t on t.id = r.agency_type_id where r.category_key = 'all')
+  = 'Client,PMC / Architect / Client person,Electrician,Carpenter,VTECH Sales Team,VTech Installers,VTech Programmers', 'v7: All dependencies offers all 7 groups');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+set role authenticated;
+select pg_temp.assert((select count(*) from public.boq_events where project_id = (select id from t_v5p) and event = 'added') = 1, 'v7: placing a product logs an "added" BOQ event');
+do $$ begin
+  perform public.edit_boq((select id from t_v5p), '[]'::jsonb, array[(select id from t_v5)], 'Vipul', now(), 'too short', 'call', 'x');
+  raise exception 'should have failed';
+exception when check_violation then raise notice 'ok - v7: a reason under 10 words is refused';
+end $$;
+do $$ begin
+  perform public.edit_boq((select id from t_v5p), '[]'::jsonb, array[(select id from t_v5)], 'Vipul', now(), 'Client dropped the network rack because the builder supplies one already on site', null, null);
+  raise exception 'should have failed';
+exception when check_violation then raise notice 'ok - v7: a change without reference is refused';
+end $$;
+create temp table t_v7 as select public.edit_boq((select id from t_v5p),
+  jsonb_build_array(jsonb_build_object('room_id', (select id from public.rooms where project_id = (select id from t_v5p) limit 1),
+                                       'product_id', (select id from public.product_catalogue where title = 'Keypad'), 'location', 'Entrance', 'quantity', 2)),
+  array[(select id from t_v5)], 'Vipul Shah', '2026-11-04 10:30+05:30',
+  'Client dropped the network rack because the builder supplies one already on site', 'email', 'Mail from Vipul, 4 Nov, subject: Rack change') as id;
+select pg_temp.assert((select count(*) from public.boq_events where change_id = (select id from t_v7)) = 2, 'v7: edit_boq logs one added + one removed, linked to the change request');
+select pg_temp.assert((select string_agg(event || ':' || product, ',' order by event) from public.boq_events where change_id = (select id from t_v7)) = 'added:Keypad,removed:Switch /Router', 'v7: history keeps the removed product name');
+select pg_temp.assert((select kind || '/' || reference_type from public.project_changes where id = (select id from t_v7)) = 'boq/email', 'v7: change request stored with reference');
+update public.room_products set quantity = 3 where project_id = (select id from t_v5p);
+select pg_temp.assert((select details->'quantity'->>'to' from public.boq_events where project_id = (select id from t_v5p) and event = 'changed') = '3', 'v7: quantity change logged');
+reset role;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
+set role authenticated;
+select pg_temp.assert((select count(*) from public.boq_events where project_id = (select id from t_v5p)) = 0, 'v7: outsider sees no BOQ history');
 reset role;
 
 \echo ALL SQL TESTS PASSED

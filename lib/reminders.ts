@@ -12,7 +12,7 @@ const todayIst = () => new Date(Date.now() + 5.5 * 3_600_000).toISOString().slic
 
 export interface CategoryAgency { id: string; companyName: string; contacts: { name: string; designation: string | null; email: string | null; phone: string | null }[] }
 export interface CategoryRecipient { agencyTypeId: string; name: string; internal: boolean; defaultChecked: boolean; agencies: CategoryAgency[] }
-export interface Category { key: string; label: string; colour: string | null; itemCount: number; recipients: CategoryRecipient[] }
+export interface Category { key: string; label: string; section: 'all' | 'vtech' | 'other'; colour: string | null; itemCount: number; recipients: CategoryRecipient[] }
 
 interface AgencyRow {
   id: string; company_name: string; agency_type_id: string;
@@ -30,7 +30,7 @@ async function loadAgencies(db: Db, projectId: string): Promise<AgencyRow[]> {
 /** GET …/reminder-categories: every category with its pending count and the project's agencies per recipient group. */
 export async function loadCategories(db: Db, projectId: string): Promise<Category[]> {
   const [cats, recips, counts, agencies] = await Promise.all([
-    db.from('reminder_categories').select('key, label, colour, sort').order('sort'),
+    db.from('reminder_categories').select('key, label, section, colour, sort').order('sort'),
     db.from('reminder_category_recipients').select('category_key, agency_type_id, default_checked, sort, agency_types(name, internal)').order('sort'),
     db.from('reminder_category_items').select('category_key').eq('project_id', projectId),
     loadAgencies(db, projectId),
@@ -39,7 +39,7 @@ export async function loadCategories(db: Db, projectId: string): Promise<Categor
   const n = new Map<string, number>();
   for (const r of counts.data ?? []) n.set(r.category_key, (n.get(r.category_key) ?? 0) + 1);
   return (cats.data ?? []).map((c) => ({
-    key: c.key, label: c.label, colour: c.colour, itemCount: n.get(c.key) ?? 0,
+    key: c.key, label: c.label, section: c.section, colour: c.colour, itemCount: n.get(c.key) ?? 0,
     recipients: (recips.data ?? []).filter((r) => r.category_key === c.key).map((r) => {
       const t = one(r.agency_types as One<{ name: string; internal: boolean }>);
       return {
@@ -70,6 +70,7 @@ export interface PlannedMessage { agencyId: string; agency: string; typeName: st
 /**
  * Pure: one report per selected agency, each listing ALL items of the category (not only the agency's own).
  * Agencies of an unselected group are ignored. Every active contact receives it; no escalation, no CC.
+ * External recipients never see items that wait on a VTech team (VTech, 2026-11-04): those go only to VTech groups.
  */
 export function planRound(input: {
   project: { name: string; clientName: string | null; terms: string };
@@ -84,11 +85,13 @@ export function planRound(input: {
   for (const g of input.groups) {
     const mine = input.agencies.filter((a) => a.agencyTypeId === g.agencyTypeId);
     if (!mine.length) { warnings.push(`${g.name}: not added to this project; skipped.`); continue; }
+    const items = g.internal ? input.items : input.items.filter((i) => !i.ownerInternal);
+    if (!items.length) { warnings.push(`${g.name}: only VTech items pending in this category; nothing sent to them.`); continue; }
     for (const a of mine) {
       const report = buildAgencyReport({
         project: input.project, visitDate: input.date, occasion: 'follow_up', category: input.category,
         agency: { companyName: a.companyName, typeName: g.name, contacts: a.contacts, internal: g.internal },
-        pm: input.pm, items: input.items,
+        pm: input.pm, items,
       });
       warnings.push(...report.warnings);
       messages.push({ agencyId: a.id, agency: `${g.name} – ${a.companyName}`, typeName: g.name, report });
@@ -127,7 +130,7 @@ export async function runRound(db: Db, me: Me, projectId: string, input: RoundIn
   if (bad.length) throw new HttpError(400, `Not a recipient group of "${cat.label}"`);
 
   const typeById = new Map((types ?? []).map((t) => [t.id as string, t as { id: string; name: string; internal: boolean }]));
-  const ownerOf = new Map((catItems ?? []).map((r) => [r.item_id as string, typeById.get(r.agency_type_id)?.name ?? null]));
+  const ownerOf = new Map((catItems ?? []).map((r) => [r.item_id as string, typeById.get(r.agency_type_id) ?? null]));
   if (!ownerOf.size) throw new HttpError(400, `Nothing pending under "${cat.label}"`);
 
   const { data: rows, error: iErr } = await db.from('dependency_items')
@@ -139,7 +142,8 @@ export async function runRound(db: Db, me: Me, projectId: string, input: RoundIn
     return {
       itemId: r.id, floorLabel: floor.label, floorSort: floor.sort, roomName: room.name, roomSort: room.sort,
       seq: dep.seq, text: dep.text, firstRaisedOn: r.first_raised_on, reminderCount: r.reminder_count,
-      note: [r.stuck_reason, r.note].filter(Boolean).join(' · ') || null, owner: ownerOf.get(r.id),
+      note: [r.stuck_reason, r.note].filter(Boolean).join(' · ') || null,
+      owner: ownerOf.get(r.id)?.name ?? null, ownerInternal: !!ownerOf.get(r.id)?.internal,
     };
   });
 
