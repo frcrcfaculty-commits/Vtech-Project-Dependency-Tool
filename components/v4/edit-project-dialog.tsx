@@ -54,9 +54,23 @@ interface NewProductRow {
   tempId: string;
   room_id: string;
   product_id: string;
+  product_title?: string;
   location: string;
+  make?: string;
+  model?: string;
+  note?: string;
   quantity: number;
 }
+
+const COMMON_LOCATIONS = [
+  'Entrance', 'Bedside', 'Ceiling', 'Wall', 'Floor', 'Window', 'TV Unit', 'Door', 'Wardrobe', 'Balcony', 'Kitchen', 'Bathroom', 'Passage', 'Other'
+];
+const COMMON_MAKES = [
+  'VTech', 'Lutron', 'Crestron', 'Sonance', 'Apple', 'Samsung', 'Sony', 'Philips', 'Daikin', 'Somfy', 'Other'
+];
+const COMMON_MODELS = [
+  'Standard', 'Custom', 'Pro', 'Elite', 'Series 1', 'Series 2', '2-Channel', '4-Channel', '8-Channel', 'Other'
+];
 
 const STATUS_LABEL: Record<string, string> = { active: 'Active', on_hold: 'On hold', finished: 'Finished', closed: 'Closed' };
 const REFERENCE_TYPES = [
@@ -140,6 +154,14 @@ export function EditProjectDialog({
       });
   }, [project.id]);
 
+  // Add product row state (starts as '--' / empty)
+  const [curRoomId, setCurRoomId] = useState('');
+  const [curProductId, setCurProductId] = useState('');
+  const [curLocation, setCurLocation] = useState('');
+  const [curMake, setCurMake] = useState('');
+  const [curModel, setCurModel] = useState('');
+  const [curOther, setCurOther] = useState('');
+
   // Live word counter
   const wordCount = useMemo(() => {
     const words = reason.trim().split(/\s+/).filter(Boolean);
@@ -148,26 +170,35 @@ export function EditProjectDialog({
 
   const hasEnoughWords = wordCount >= 10;
 
-  // Add product row
-  const addProductRow = () => {
+  // Add product handler: 1 item per click, no counter, disabled until product and location chosen
+  const handleAddProduct = () => {
+    if (!curProductId || !curLocation || curProductId === '--' || curLocation === '--') return;
+    const targetRoomId = curRoomId || roomOptions[0]?.id || '';
+    const prod = catalogue.find((c) => c.id === curProductId);
     setNewProducts((prev) => [
       ...prev,
       {
         tempId: crypto.randomUUID(),
-        room_id: roomOptions[0]?.id || '',
-        product_id: catalogue[0]?.id || '',
-        location: '',
+        room_id: targetRoomId,
+        product_id: curProductId,
+        product_title: prod?.title || 'Product',
+        location: curLocation === '--' ? '' : curLocation,
+        make: curMake === '--' ? '' : curMake,
+        model: curModel === '--' ? '' : curModel,
+        note: curOther.trim() || undefined,
         quantity: 1,
       },
     ]);
+    // Reset to '--'
+    setCurProductId('');
+    setCurLocation('');
+    setCurMake('');
+    setCurModel('');
+    setCurOther('');
   };
 
   const removeNewProductRow = (tempId: string) => {
     setNewProducts((prev) => prev.filter((p) => p.tempId !== tempId));
-  };
-
-  const updateNewProductRow = (tempId: string, patch: Partial<NewProductRow>) => {
-    setNewProducts((prev) => prev.map((p) => (p.tempId === tempId ? { ...p, ...patch } : p)));
   };
 
   const projectChanges = useMemo(() => {
@@ -256,6 +287,24 @@ export function EditProjectDialog({
           p_reference: reference.trim(),
         });
         if (rpcErr) throw rpcErr;
+
+        // Update make, model, note for newly added products
+        for (const np of newProducts) {
+          if (np.make || np.model || np.note) {
+            await sb
+              .from('room_products')
+              .update({
+                make: np.make || null,
+                model: np.model || null,
+                note: np.note || null,
+              })
+              .eq('project_id', p.id)
+              .eq('product_id', np.product_id)
+              .eq('room_id', np.room_id || null)
+              .order('created_at', { ascending: false })
+              .limit(1);
+          }
+        }
       }
 
       // 2. Project details update
@@ -399,18 +448,9 @@ export function EditProjectDialog({
             </div>
 
             {/* Current Products */}
-            <div className="mt-6 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-text-primary">Current products ({ls.length})</h3>
-                <p className="text-xs text-text-secondary">Room · Product · Location · Qty</p>
-              </div>
-              <button
-                type="button"
-                onClick={addProductRow}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent-hover transition-colors"
-              >
-                <Glyph name="plus" /> Add product
-              </button>
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-text-primary">Current products ({ls.length})</h3>
+              <p className="text-xs text-text-secondary">Room · Product · Location · Qty</p>
             </div>
 
             <div className="mt-2 max-h-60 overflow-auto rounded-xl border border-border">
@@ -472,6 +512,104 @@ export function EditProjectDialog({
               </table>
             </div>
 
+            {/* Add product aligned row (sheet tab "Pending Page" row 12) */}
+            <div className="mt-4 rounded-xl border border-border bg-surface p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-text-primary">
+                  Add product
+                </h4>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-text-secondary">Room:</span>
+                  <select
+                    value={curRoomId}
+                    onChange={(e) => setCurRoomId(e.target.value)}
+                    className="rounded-lg border border-border px-2.5 py-1 text-xs bg-surface"
+                  >
+                    {roomOptions.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.floorLabel ? `${r.floorLabel} · ` : ''}{r.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Aligned Row: Product · Location · Make · Model · Other · [Add] */}
+              <div className="grid grid-cols-1 sm:grid-cols-[1.2fr_1fr_1fr_1fr_1.2fr_auto] gap-2 items-center">
+                {/* 1. Product dropdown */}
+                <select
+                  aria-label="Product"
+                  value={curProductId}
+                  onChange={(e) => setCurProductId(e.target.value)}
+                  className="w-full rounded-lg border border-border px-2.5 py-2 text-xs bg-surface focus:border-accent"
+                >
+                  <option value="">-- Product --</option>
+                  {catalogue.map((c) => (
+                    <option key={c.id} value={c.id}>{c.title}</option>
+                  ))}
+                </select>
+
+                {/* 2. Location dropdown */}
+                <select
+                  aria-label="Location"
+                  value={curLocation}
+                  onChange={(e) => setCurLocation(e.target.value)}
+                  className="w-full rounded-lg border border-border px-2.5 py-2 text-xs bg-surface focus:border-accent"
+                >
+                  <option value="">-- Location --</option>
+                  {COMMON_LOCATIONS.map((loc) => (
+                    <option key={loc} value={loc}>{loc}</option>
+                  ))}
+                </select>
+
+                {/* 3. Make dropdown */}
+                <select
+                  aria-label="Make"
+                  value={curMake}
+                  onChange={(e) => setCurMake(e.target.value)}
+                  className="w-full rounded-lg border border-border px-2.5 py-2 text-xs bg-surface focus:border-accent"
+                >
+                  <option value="">-- Make --</option>
+                  {COMMON_MAKES.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+
+                {/* 4. Model dropdown */}
+                <select
+                  aria-label="Model"
+                  value={curModel}
+                  onChange={(e) => setCurModel(e.target.value)}
+                  className="w-full rounded-lg border border-border px-2.5 py-2 text-xs bg-surface focus:border-accent"
+                >
+                  <option value="">-- Model --</option>
+                  {COMMON_MODELS.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+
+                {/* 5. Other / Note text */}
+                <input
+                  aria-label="Other / note"
+                  type="text"
+                  placeholder="Other / note"
+                  value={curOther}
+                  onChange={(e) => setCurOther(e.target.value)}
+                  className="w-full rounded-lg border border-border px-2.5 py-2 text-xs bg-surface focus:border-accent"
+                />
+
+                {/* 6. Add button */}
+                <button
+                  type="button"
+                  disabled={!curProductId || !curLocation || curProductId === '--' || curLocation === '--'}
+                  onClick={handleAddProduct}
+                  className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-white hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
             {/* Added products rows */}
             {newProducts.length > 0 && (
               <div className="mt-4 rounded-xl border border-accent/30 bg-accent/5 p-3.5">
@@ -479,67 +617,34 @@ export function EditProjectDialog({
                   New products to add ({newProducts.length})
                 </h4>
                 <div className="space-y-2">
-                  {newProducts.map((np) => (
-                    <div key={np.tempId} className="grid grid-cols-1 gap-2 rounded-lg border border-border bg-surface p-2.5 sm:grid-cols-[1.2fr_1.5fr_1.2fr_70px_36px] sm:items-center">
-                      <div>
-                        <label className="block text-[10px] font-semibold text-text-muted mb-0.5 sm:hidden">Room</label>
-                        <select
-                          className="w-full rounded-md border border-border px-2 py-1.5 text-xs bg-surface"
-                          value={np.room_id}
-                          onChange={(e) => updateNewProductRow(np.tempId, { room_id: e.target.value })}
-                        >
-                          {roomOptions.map((r) => (
-                            <option key={r.id} value={r.id}>
-                              {r.floorLabel ? `${r.floorLabel} · ` : ''}{r.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-semibold text-text-muted mb-0.5 sm:hidden">Product</label>
-                        <select
-                          className="w-full rounded-md border border-border px-2 py-1.5 text-xs bg-surface"
-                          value={np.product_id}
-                          onChange={(e) => updateNewProductRow(np.tempId, { product_id: e.target.value })}
-                        >
-                          {catalogue.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.title}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-semibold text-text-muted mb-0.5 sm:hidden">Location</label>
-                        <input
-                          placeholder="Location (e.g. Bedside)"
-                          className="w-full rounded-md border border-border px-2 py-1.5 text-xs bg-surface"
-                          value={np.location}
-                          onChange={(e) => updateNewProductRow(np.tempId, { location: e.target.value })}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-semibold text-text-muted mb-0.5 sm:hidden">Qty</label>
-                        <input
-                          type="number"
-                          min={1}
-                          className="w-full rounded-md border border-border px-2 py-1.5 text-xs text-center bg-surface"
-                          value={np.quantity}
-                          onChange={(e) => updateNewProductRow(np.tempId, { quantity: Math.max(1, parseInt(e.target.value) || 1) })}
-                        />
-                      </div>
-                      <div className="flex justify-end sm:justify-center">
+                  {newProducts.map((np) => {
+                    const roomName = roomOptions.find((r) => r.id === np.room_id)?.name ?? 'Room';
+                    const specStr = [np.make, np.model, np.note].filter(Boolean).join(' · ');
+                    return (
+                      <div
+                        key={np.tempId}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-semibold text-text-primary">
+                            {np.product_title}
+                            <span className="ml-1.5 font-normal text-text-muted">
+                              ({roomName}{np.location ? ` · ${np.location}` : ''})
+                            </span>
+                          </p>
+                          {specStr && <p className="text-[11px] text-text-muted mt-0.5">{specStr}</p>}
+                        </div>
                         <button
                           type="button"
                           onClick={() => removeNewProductRow(np.tempId)}
-                          aria-label="Remove new product row"
-                          className="rounded p-1 text-danger hover:bg-danger-light"
+                          aria-label="Remove new product"
+                          className="rounded p-1 text-danger hover:bg-danger-light transition-colors"
                         >
                           <Glyph name="cross" />
                         </button>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
