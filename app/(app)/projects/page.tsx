@@ -395,7 +395,7 @@ export default function ProjectsPage() {
                       <div className="min-w-0 flex-1">
                         <Link
                           href={`/hub?p=${p.id}`}
-                          className="text-base font-bold text-text-primary group-hover:text-accent transition-colors block truncate"
+                          className="text-base font-extrabold text-text-primary group-hover:text-accent transition-colors block truncate"
                           title={p.name}
                         >
                           {p.name}

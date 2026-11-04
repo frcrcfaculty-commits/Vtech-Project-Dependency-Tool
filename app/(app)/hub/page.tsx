@@ -1,9 +1,13 @@
 'use client';
 
-// VTech Dashboard (v4). Project tiles on top; the selected project opens below with its filters, actions and a
-// matrix of every BOQ line (Product · Location · Agency involved · Quantity · Status). Status shows the line's
-// dependencies as checkboxes in the sheet's colours: all green steps first, then one step at a time.
-// Lock state comes only from the database view item_gate (see migration 0009).
+// VTech Dashboard (v8).
+// 1. Every line always shows exactly one ✗ = the step being worked on now (the first open, non-done step).
+//    Done steps show ✓. When marked done, ✗ moves automatically to the next open step.
+// 2. Company-wide "being worked on" view across all active projects, grouped by project (project name bold 18px heavy).
+//    Project tiles on top (click = filter to that project); 4 stat cards show stats for the selected project (or all active).
+// 3. Location column: Room-wise has location main. Agency-wise and Product-wise have room name big, location small.
+// 4. Floating buttons: "Send reminders" stacked 12px above "Add dependency" at bottom-right, no overlap.
+// 5. No "Close project", no "Open in Hub", project names font-weight 800.
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -22,17 +26,32 @@ import { LEGEND_ORDER, STEP_COLOURS, isDone, lineStatus, stepColour, type GateRo
 
 type ProjectStatus = 'active' | 'on_hold' | 'closed' | 'finished';
 interface ProjectTile {
-  id: string; name: string; client_name: string | null; site_address: string | null; status: ProjectStatus;
-  pending: number; done: number; total: number;
+  id: string;
+  name: string;
+  client_name: string | null;
+  site_address: string | null;
+  status: ProjectStatus;
+  pending: number;
+  done: number;
+  total: number;
 }
-interface Floor { id: string; label: string; sort: number }
-interface Room { id: string; floor_id: string; name: string; sort: number }
-interface Agency { id: string; company_name: string; agency_types: { name: string; internal: boolean; active?: boolean } | null }
+interface Floor { id: string; project_id?: string; label: string; sort: number }
+interface Room { id: string; project_id?: string; floor_id: string; name: string; sort: number }
+interface Agency { id: string; project_id?: string; company_name: string; agency_types: { name: string; internal: boolean; active?: boolean } | null }
 interface Line {
-  id: string; room_id: string; product_id: string | null; boq_title: string | null; location: string | null; quantity: number;
-  brand: string | null; make: string | null; model: string | null; product_catalogue: { title: string; scope: string } | null;
+  id: string;
+  project_id?: string;
+  room_id: string;
+  product_id: string | null;
+  boq_title: string | null;
+  location: string | null;
+  quantity: number;
+  brand: string | null;
+  make: string | null;
+  model: string | null;
+  product_catalogue: { title: string; scope: string } | null;
 }
-type StatusFilter = 'all' | 'open' | 'stuck' | 'done';
+type StatusFilter = 'open' | 'all' | 'stuck' | 'done';
 
 interface DueFollowup {
   id: string;
@@ -75,14 +94,12 @@ function Dashboard() {
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
   const [gate, setGate] = useState<GateRow[]>([]);
-  const [progress, setProgress] = useState({ installation: 0, programming: 0 });
   const [detailLoading, setDetailLoading] = useState(false);
 
   const [sortBy, setSortBy] = useState<SortBy>('room');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
   const [agencyFilter, setAgencyFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [showAllSteps, setShowAllSteps] = useState(false);
 
   const [stepRow, setStepRow] = useState<GateRow | null>(null);
   const [customFor, setCustomFor] = useState<Line | null>(null);
@@ -131,43 +148,27 @@ function Dashboard() {
     }
   };
 
-  useEffect(() => {
-    loadProjects().then((tiles) => {
-      if (!tiles) return;
-      const q = params.get('p');
-      const chosen = (q && tiles.find((t) => t.id === q)) || tiles.find((t) => t.status === 'active' || t.status === 'on_hold') || tiles[0];
-      if (chosen) {
-        setSelectedId(chosen.id);
-        if (chosen.status === 'closed' || chosen.status === 'finished') setShowArchived(true);
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const [stepAgencyTypes, setStepAgencyTypes] = useState<Map<string, string>>(new Map());
 
-  // ── selected project ──
-  const loadDetails = useCallback(async (id: string) => {
-    if (!id) return;
+  // ── load all active data ──
+  const loadAllData = useCallback(async () => {
     setDetailLoading(true);
     const sb = supabaseBrowser();
-    const [f, r, a, l, g, pr, ps] = await Promise.all([
-      sb.from('floors').select('id, label, sort').eq('project_id', id).order('sort'),
-      sb.from('rooms').select('id, floor_id, name, sort').eq('project_id', id).order('sort'),
-      sb.from('agencies').select('id, company_name, agency_types(name, internal, active)').eq('project_id', id),
-      sb.from('room_products').select('id, room_id, product_id, boq_title, location, quantity, brand, make, model, product_catalogue(title, scope)').eq('project_id', id),
-      sb.from('item_gate').select('*').eq('project_id', id).order('seq'),
-      sb.from('project_progress').select('installation_pct, programming_pct').eq('project_id', id).maybeSingle(),
+    const [f, r, a, l, g, ps] = await Promise.all([
+      sb.from('floors').select('id, project_id, label, sort').order('sort'),
+      sb.from('rooms').select('id, project_id, floor_id, name, sort').order('sort'),
+      sb.from('agencies').select('id, project_id, company_name, agency_types(name, internal, active)'),
+      sb.from('room_products').select('id, project_id, room_id, product_id, boq_title, location, quantity, brand, make, model, product_catalogue(title, scope)'),
+      sb.from('item_gate').select('*').order('seq'),
       sb.from('product_steps').select('id, agency_types(name)'),
     ]);
-    const err = [f, r, a, l, g, pr, ps].find((x) => x.error)?.error;
+    const err = [f, r, a, l, g, ps].find((x) => x.error)?.error;
     if (err) setError(err.message);
     setFloors((f.data ?? []) as Floor[]);
     setRooms((r.data ?? []) as Room[]);
     setAgencies((a.data ?? []) as unknown as Agency[]);
     setLines((l.data ?? []) as unknown as Line[]);
     setGate((g.data ?? []) as GateRow[]);
-    setProgress({ installation: Number(pr.data?.installation_pct ?? 0), programming: Number(pr.data?.programming_pct ?? 0) });
     const stepMap = new Map<string, string>();
     for (const s of (ps.data ?? []) as unknown as { id: string; agency_types: { name: string } | null }[]) {
       if (s.agency_types?.name) stepMap.set(s.id, s.agency_types.name);
@@ -177,28 +178,42 @@ function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!selectedId) return;
-    loadDetails(selectedId);
+    loadProjects().then((tiles) => {
+      if (!tiles) return;
+      const q = params.get('p');
+      if (q && tiles.some((t) => t.id === q)) {
+        setSelectedId(q);
+      }
+    });
+    loadAllData();
+  }, [loadProjects, loadAllData, params]);
+
+  // Sync selectedId with URL params
+  const handleSelectProject = (id: string) => {
+    const next = selectedId === id ? '' : id;
+    setSelectedId(next);
     const url = new URL(window.location.href);
-    if (url.searchParams.get('p') !== selectedId) {
-      url.searchParams.set('p', selectedId);
-      window.history.replaceState(null, '', url.toString());
+    if (next) {
+      url.searchParams.set('p', next);
+    } else {
+      url.searchParams.delete('p');
     }
-  }, [selectedId, loadDetails]);
+    window.history.replaceState(null, '', url.toString());
+  };
 
   const refresh = useCallback(async () => {
-    await Promise.all([loadDetails(selectedId), loadProjects()]);
+    await Promise.all([loadAllData(), loadProjects()]);
     window.dispatchEvent(new Event(DASHBOARD_CHANGED));
-  }, [selectedId, loadDetails, loadProjects]);
+  }, [loadAllData, loadProjects]);
 
   useEffect(() => {
-    const h = () => { loadDetails(selectedId); loadProjects(); };
+    const h = () => { loadAllData(); loadProjects(); };
     window.addEventListener('vtech:dependency-added', h);
     window.addEventListener(DASHBOARD_CHANGED, h);
     return () => { window.removeEventListener('vtech:dependency-added', h); window.removeEventListener(DASHBOARD_CHANGED, h); };
-  }, [selectedId, loadDetails, loadProjects]);
+  }, [loadAllData, loadProjects]);
 
-  // Deep links from the notifications: ?steps=<line> opens "add dependencies", ?edit=1 opens edit.
+  // Deep links from notifications: ?steps=<line> opens "add dependencies", ?edit=1 opens edit
   useEffect(() => {
     const stepsFor = params.get('steps');
     if (stepsFor && lines.length) {
@@ -215,24 +230,39 @@ function Dashboard() {
 
   const selected = projects.find((p) => p.id === selectedId);
   const visibleProjects = projects.filter((p) => showArchived || p.status === 'active' || p.status === 'on_hold');
+  const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const roomById = useMemo(() => new Map(rooms.map((r) => [r.id, r])), [rooms]);
   const floorById = useMemo(() => new Map(floors.map((f) => [f.id, f])), [floors]);
   const agencyById = useMemo(() => new Map(agencies.map((a) => [a.id, a])), [agencies]);
+
   const gateByLine = useMemo(() => {
     const m = new Map<string, GateRow[]>();
-    for (const g of gate) { const a = m.get(g.room_product_id) ?? []; a.push(g); m.set(g.room_product_id, a); }
+    for (const g of gate) {
+      const a = m.get(g.room_product_id) ?? [];
+      a.push(g);
+      m.set(g.room_product_id, a);
+    }
     return m;
   }, [gate]);
+
+  const relevantAgencies = useMemo(() => {
+    if (selectedId) {
+      return agencies.filter((a) => a.project_id === selectedId);
+    }
+    return agencies;
+  }, [agencies, selectedId]);
+
   const agencyOptions: AgencyOption[] = useMemo(
-    () => agencies
+    () => relevantAgencies
       .filter((a) => a.agency_types?.active !== false)
       .map((a) => ({ id: a.id, label: `${a.agency_types?.name ?? 'Agency'} – ${a.company_name}`, internal: !!a.agency_types?.internal, typeName: a.agency_types?.name ?? '' }))
       .sort((x, y) => x.label.localeCompare(y.label)),
-    [agencies]
+    [relevantAgencies]
   );
 
   const where = (roomId: string) => {
-    const r = roomById.get(roomId); const f = r ? floorById.get(r.floor_id) : undefined;
+    const r = roomById.get(roomId);
+    const f = r ? floorById.get(r.floor_id) : undefined;
     return [f?.label, r?.name].filter(Boolean).join(' · ');
   };
   const titleOf = (l: Line) => l.product_catalogue?.title ?? l.boq_title ?? 'Product';
@@ -274,43 +304,120 @@ function Dashboard() {
     return 'General – Unassigned';
   };
 
-  // ── matrix rows ──
+  // ── active lines & gate ──
+  // If selectedId is set, filter to selectedId. Otherwise include all visible (active/on_hold) projects.
+  const activeLines = useMemo(() => {
+    const allowedProjectIds = new Set(
+      selectedId ? [selectedId] : visibleProjects.map((p) => p.id)
+    );
+    return lines.filter((l) => l.project_id && allowedProjectIds.has(l.project_id));
+  }, [lines, selectedId, visibleProjects]);
+
+  const activeGate = useMemo(() => {
+    const allowedProjectIds = new Set(
+      selectedId ? [selectedId] : visibleProjects.map((p) => p.id)
+    );
+    return gate.filter((g) => allowedProjectIds.has(g.project_id));
+  }, [gate, selectedId, visibleProjects]);
+
+  // ── totals for the 4 stat cards ──
+  const totals = useMemo(() => {
+    // 1. Products (line items): total · done · not done
+    const totalLines = activeLines.length;
+    let doneLines = 0;
+    for (const l of activeLines) {
+      const g = gateByLine.get(l.id) ?? [];
+      if (lineStatus(g).allDone) {
+        doneLines++;
+      }
+    }
+    const notDoneLines = totalLines - doneLines;
+
+    // 2. Other agency: pending items waiting on external agencies + client (red number)
+    const otherAgencyPending = activeGate.filter(
+      (g) => (g.responsibility === 'external' || g.responsibility === 'client') && g.status === 'pending'
+    ).length;
+
+    // 3. VTech Installer: total · done · pending of installer steps (sheet colour E06666)
+    const installerSteps = activeGate.filter((g) => (g.sheet_colour ?? '').toUpperCase() === 'E06666');
+    const installerTotal = installerSteps.length;
+    const installerDone = installerSteps.filter((g) => isDone(g.status)).length;
+    const installerPending = installerSteps.filter((g) => g.status === 'pending').length;
+
+    // 4. VTech Programmer: total · done · pending of programmer steps (sheet colour F4CCCC)
+    const programmerSteps = activeGate.filter((g) => (g.sheet_colour ?? '').toUpperCase() === 'F4CCCC');
+    const programmerTotal = programmerSteps.length;
+    const programmerDone = programmerSteps.filter((g) => isDone(g.status)).length;
+    const programmerPending = programmerSteps.filter((g) => g.status === 'pending').length;
+
+    const chaseable = activeGate.filter(
+      (g) => !isDone(g.status) && !g.locked && g.status === 'pending' && !g.waits_on_client
+    ).length;
+    const needsSteps = activeLines.filter((l) => !l.product_id && !(gateByLine.get(l.id)?.length)).length;
+
+    return {
+      products: { total: totalLines, done: doneLines, notDone: notDoneLines },
+      otherAgencyPending,
+      installer: { total: installerTotal, done: installerDone, pending: installerPending },
+      programmer: { total: programmerTotal, done: programmerDone, pending: programmerPending },
+      chaseable,
+      needsSteps,
+    };
+  }, [activeLines, activeGate, gateByLine]);
+
+  // ── matrix rows: only lines whose ✗ step is pending/open ──
+  // The ✗ step = the first step (sheet order) that is open and not Done/N.A.
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return lines
+    return activeLines
       .map((l) => {
         const g = gateByLine.get(l.id) ?? [];
+        const ordered = [...g].sort((a, b) => a.seq - b.seq);
+        const currentStep = ordered.find((r) => !isDone(r.status) && !r.locked);
         const st = lineStatus(g);
-        const shownSteps = showAllSteps ? [...g].sort((a, b) => a.seq - b.seq) : st.visible;
-        const involved = [
-          ...new Set(
-            st.visible
-              .filter((x) => !isDone(x.status))
-              .map((x) => {
-                const a = x.agency_id ? agencyById.get(x.agency_id) : undefined;
-                const defType = x.step_id ? stepAgencyTypes.get(x.step_id) : undefined;
-                return formatAgency(a, defType, x.sheet_colour);
-              })
-              .filter(Boolean)
-          ),
-        ] as string[];
-        return { line: l, gate: g, st, shownSteps, involved };
-      })
-      .filter(({ line, gate: g, st, involved }) => {
-        if (q && !`${titleOf(line)} ${line.location ?? ''} ${where(line.room_id)} ${line.brand ?? ''} ${line.model ?? ''}`.toLowerCase().includes(q)) return false;
-        if (agencyFilter !== 'all' && !g.some((x) => x.agency_id === agencyFilter && !isDone(x.status))) return false;
-        if (statusFilter === 'done') return st.allDone;
-        if (statusFilter === 'open') return !st.allDone;
-        if (statusFilter === 'stuck') return st.visible.some((x) => x.status === 'pending');
-        void involved;
-        return true;
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, gateByLine, showAllSteps, search, agencyFilter, statusFilter, roomById, floorById, agencyById, stepAgencyTypes]);
 
-  const groups = useMemo(() => {
-    const m = new Map<string, { key: string; label: string; sub?: string; order: (number | string)[]; rows: typeof rows }>();
+        const currentAgency = currentStep?.agency_id ? agencyById.get(currentStep.agency_id) : undefined;
+        const currentDefType = currentStep?.step_id ? stepAgencyTypes.get(currentStep.step_id) : undefined;
+        const waitingOnAgency = currentStep ? formatAgency(currentAgency, currentDefType, currentStep.sheet_colour) : null;
+
+        return { line: l, gate: g, st, currentStep, waitingOnAgency, project: projectById.get(l.project_id ?? '') };
+      })
+      .filter(({ line, gate: g, st, currentStep }) => {
+        // Search filter
+        if (q && !`${titleOf(line)} ${line.location ?? ''} ${where(line.room_id)} ${line.brand ?? ''} ${line.model ?? ''}`.toLowerCase().includes(q)) return false;
+        // Agency filter
+        if (agencyFilter !== 'all' && !g.some((x) => x.agency_id === agencyFilter && !isDone(x.status))) return false;
+
+        // Status filter: by default 'open' (only lines whose ✗ step is pending/open)
+        if (statusFilter === 'open') {
+          return currentStep !== undefined;
+        }
+        if (statusFilter === 'stuck') {
+          return currentStep?.status === 'pending';
+        }
+        if (statusFilter === 'done') {
+          return st.allDone;
+        }
+        return true; // 'all'
+      });
+  }, [activeLines, gateByLine, search, agencyFilter, statusFilter, agencyById, stepAgencyTypes, projectById]);
+
+  // ── Grouping: Company-wide by Project, then inside each project by SortBy ──
+  const groupedProjects = useMemo(() => {
+    const m = new Map<string, { project: ProjectTile; rows: typeof rows }>();
     for (const r of rows) {
+      const p = r.project ?? { id: r.line.project_id ?? 'unknown', name: 'Other', client_name: null, site_address: null, status: 'active', pending: 0, done: 0, total: 0 };
+      const gr = m.get(p.id) ?? { project: p, rows: [] };
+      gr.rows.push(r);
+      m.set(p.id, gr);
+    }
+    return [...m.values()].sort((a, b) => b.rows.length - a.rows.length || a.project.name.localeCompare(b.project.name));
+  }, [rows]);
+
+  // Sub-group helper within a set of rows
+  const groupRows = useCallback((projectRows: typeof rows) => {
+    const m = new Map<string, { key: string; label: string; sub?: string; order: (number | string)[]; rows: typeof rows }>();
+    for (const r of projectRows) {
       const room = roomById.get(r.line.room_id);
       const floor = room ? floorById.get(room.floor_id) : undefined;
       const scope = r.line.product_catalogue?.scope;
@@ -323,29 +430,16 @@ function Dashboard() {
         gr.rows.push(r);
         m.set(key, gr);
       } else if (sortBy === 'agency') {
-        // Agency-wise key = label (<Type> – <Company> or <Type> – VTech),
-        // type first, VTech teams without duplicate name.
-        const waitingSteps = r.st.visible.filter((x) => !isDone(x.status));
-        const activeSteps = waitingSteps.length > 0 ? waitingSteps : r.gate.filter((x) => !isDone(x.status));
-        const targetSteps = activeSteps.length > 0 ? activeSteps : (r.gate.length > 0 ? [r.gate[0]] : [{ agency_id: null, step_id: null, sheet_colour: null }]);
-        const seenKeys = new Set<string>();
-        for (const step of targetSteps) {
-          const agency = step.agency_id ? agencyById.get(step.agency_id) : undefined;
-          const defaultType = step.step_id ? stepAgencyTypes.get(step.step_id) : undefined;
-          const label = formatAgency(agency, defaultType, 'sheet_colour' in step ? step.sheet_colour : null);
-          const key = label;
-          const isVTech = label.endsWith('– VTech');
-          const order = [isVTech ? 1 : 0, label];
-
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key);
-            const gr = m.get(key) ?? { key, label, order, rows: [] as typeof rows };
-            gr.rows.push(r);
-            m.set(key, gr);
-          }
-        }
+        // Agency-wise: type first, VTech without repeated name
+        const key = r.waitingOnAgency || 'General – Unassigned';
+        const label = key;
+        const isVTech = label.endsWith('– VTech');
+        const order = [isVTech ? 1 : 0, label];
+        const gr = m.get(key) ?? { key, label, order, rows: [] as typeof rows };
+        gr.rows.push(r);
+        m.set(key, gr);
       } else {
-        // Room-wise keeps the floor as sub-label
+        // Room-wise keeps floor as sub-label
         const key = room?.id ?? 'none';
         const label = room?.name ?? 'No room';
         const sub = floor?.label;
@@ -355,6 +449,7 @@ function Dashboard() {
         m.set(key, gr);
       }
     }
+
     const list = [...m.values()].sort((a, b) => {
       for (let i = 0; i < Math.max(a.order.length, b.order.length); i++) {
         const valA = a.order[i] ?? 0;
@@ -368,6 +463,7 @@ function Dashboard() {
       }
       return a.label.localeCompare(b.label);
     });
+
     for (const g of list) {
       g.rows.sort((a, b) => {
         if (sortBy === 'product') {
@@ -380,67 +476,22 @@ function Dashboard() {
       });
     }
     return list;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, sortBy, roomById, floorById, agencyById, stepAgencyTypes]);
-
-  const totals = useMemo(() => {
-    // 1. Products (line items): total · done · not done
-    const totalLines = lines.length;
-    let doneLines = 0;
-    for (const l of lines) {
-      const g = gateByLine.get(l.id) ?? [];
-      if (lineStatus(g).allDone) {
-        doneLines++;
-      }
-    }
-    const notDoneLines = totalLines - doneLines;
-
-    // 2. Other agency: pending items waiting on external agencies + client (red number)
-    const otherAgencyPending = gate.filter(
-      (g) => (g.responsibility === 'external' || g.responsibility === 'client') && g.status === 'pending'
-    ).length;
-
-    // 3. VTech Installer: total · done · pending of installer steps (sheet colour E06666)
-    const installerSteps = gate.filter((g) => (g.sheet_colour ?? '').toUpperCase() === 'E06666');
-    const installerTotal = installerSteps.length;
-    const installerDone = installerSteps.filter((g) => isDone(g.status)).length;
-    const installerPending = installerSteps.filter((g) => g.status === 'pending').length;
-
-    // 4. VTech Programmer: total · done · pending of programmer steps (sheet colour F4CCCC)
-    const programmerSteps = gate.filter((g) => (g.sheet_colour ?? '').toUpperCase() === 'F4CCCC');
-    const programmerTotal = programmerSteps.length;
-    const programmerDone = programmerSteps.filter((g) => isDone(g.status)).length;
-    const programmerPending = programmerSteps.filter((g) => g.status === 'pending').length;
-
-    const chaseable = gate.filter(
-      (g) => !isDone(g.status) && !g.locked && g.status === 'pending' && !g.waits_on_client
-    ).length;
-    const needsSteps = lines.filter((l) => !l.product_id && !(gateByLine.get(l.id)?.length)).length;
-
-    return {
-      products: { total: totalLines, done: doneLines, notDone: notDoneLines },
-      otherAgencyPending,
-      installer: { total: installerTotal, done: installerDone, pending: installerPending },
-      programmer: { total: programmerTotal, done: programmerDone, pending: programmerPending },
-      chaseable,
-      needsSteps,
-    };
-  }, [lines, gate, gateByLine]);
+  }, [sortBy, roomById, floorById]);
 
   // ── actions ──
   function sendReminders() {
-    if (!selectedId) return;
-    router.push(`/projects/${selectedId}/reminders`);
+    const targetId = selectedId || projects.find((p) => p.status === 'active')?.id;
+    if (!targetId) return;
+    router.push(`/projects/${targetId}/reminders`);
   }
 
   async function setProjectStatus(status: ProjectStatus) {
     if (!selected) return;
-    if (status === 'closed' && !confirm(`Close "${selected.name}"? It leaves the active list but keeps all its records.`)) return;
     setBusy('status');
     const { error: e } = await supabaseBrowser().from('projects').update({ status }).eq('id', selected.id);
     setBusy(null);
     if (e) { setError(e.message); return; }
-    flash(status === 'active' ? 'Project reopened.' : 'Project closed.');
+    flash(status === 'active' ? 'Project reopened.' : 'Project status updated.');
     if (status === 'closed') setShowArchived(true);
     await loadProjects();
   }
@@ -448,7 +499,7 @@ function Dashboard() {
   if (loading) return (<><AppHeader /><div className="flex min-h-[60dvh] items-center justify-center"><Spinner /></div></>);
 
   return (
-    <div className="min-h-dvh pb-28">
+    <div className="min-h-dvh pb-36">
       <AppHeader />
       <main className="mx-auto max-w-7xl px-4 py-6 lg:px-8">
         {/* ── title + projects ── */}
@@ -457,13 +508,27 @@ function Dashboard() {
             <GlassIcon name="building" size={44} />
             <div>
               <h1 className="text-2xl font-bold tracking-tight">VTech Dashboard</h1>
-              <p className="text-sm text-text-secondary">{profile?.full_name ? `Hello, ${profile.full_name.split(' ')[0]}. ` : ''}Pick a project to see every product and what it is waiting on.</p>
+              <p className="text-sm text-text-secondary">
+                {profile?.full_name ? `Hello, ${profile.full_name.split(' ')[0]}. ` : ''}
+                {selectedId ? `Viewing lines for ${selected?.name}. Click tile again for company-wide view.` : 'Company-wide view: showing all lines currently being worked on.'}
+              </p>
             </div>
           </div>
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm">
-            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-            Show closed &amp; finished
-          </label>
+          <div className="flex items-center gap-3">
+            {selectedId && (
+              <button
+                type="button"
+                onClick={() => handleSelectProject('')}
+                className="rounded-xl border border-accent bg-accent/10 px-3 py-2 text-xs font-semibold text-accent hover:bg-accent/20 transition"
+              >
+                ← Back to Company-wide
+              </button>
+            )}
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm">
+              <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+              Show closed &amp; finished
+            </label>
+          </div>
         </div>
 
         {error && <div role="alert" className="mt-4 rounded-xl border border-danger/30 bg-danger-light px-4 py-3 text-sm text-danger">{error}</div>}
@@ -492,7 +557,7 @@ function Dashboard() {
                 {dueFollowups.map((f) => (
                   <li key={f.id} className="pt-2 flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <span className="font-bold text-text-primary">{f.project_name}</span>: add the{' '}
+                      <span className="font-extrabold text-text-primary">{f.project_name}</span>: add the{' '}
                       <span className="font-semibold text-text-primary">{f.group_name}</span> contact
                       {f.note && <span className="text-text-muted italic ml-1">({f.note})</span>}
                     </div>
@@ -518,6 +583,7 @@ function Dashboard() {
           </div>
         )}
 
+        {/* Project tiles on top */}
         <section aria-label="Projects" className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {visibleProjects.length === 0 && <p className="col-span-full rounded-2xl border border-border bg-surface p-6 text-sm text-text-secondary">No projects yet. Use “Projects → New project” to import a BOQ.</p>}
           {visibleProjects.map((p) => {
@@ -527,11 +593,11 @@ function Dashboard() {
               <button
                 key={p.id}
                 type="button"
-                onClick={() => setSelectedId(p.id)}
+                onClick={() => handleSelectProject(p.id)}
                 aria-pressed={active}
                 className={`group rounded-2xl border bg-surface p-4 text-left transition hover:-translate-y-0.5 ${active ? 'border-accent ring-2 ring-accent/25' : 'border-border'}`}
               >
-                <h3 className="truncate text-base font-semibold text-text-primary">{p.name}</h3>
+                <h3 className="truncate text-base font-extrabold text-text-primary">{p.name}</h3>
                 <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-alt">
                   <div className="h-full rounded-full bg-accent transition-all duration-300" style={{ width: `${pct}%` }} />
                 </div>
@@ -543,14 +609,14 @@ function Dashboard() {
           })}
         </section>
 
-        {/* ── selected project ── */}
+        {/* Selected Project banner if filtered */}
         {selected && (
-          <section aria-label={selected.name} className="mt-8 rounded-2xl border border-border bg-surface p-4 sm:p-5">
+          <section aria-label={selected.name} className="mt-6 rounded-2xl border border-border bg-surface p-4 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="flex flex-wrap items-center gap-2 text-xl font-bold">
+                <h2 className="flex flex-wrap items-center gap-2 text-xl font-extrabold">
                   {selected.name}
-                  <span className="rounded-md bg-surface-alt px-2 py-0.5 text-xs font-medium text-text-secondary">{lines.length} BOQ lines</span>
+                  <span className="rounded-md bg-surface-alt px-2 py-0.5 text-xs font-medium text-text-secondary">{activeLines.length} BOQ lines</span>
                   {selected.status !== 'active' && <span className="rounded-md bg-warning-light px-2 py-0.5 text-xs font-semibold text-warning">{STATUS_BADGE[selected.status]}</span>}
                 </h2>
                 <p className="text-sm text-text-secondary">{[selected.client_name, selected.site_address].filter(Boolean).join(' · ')}</p>
@@ -570,172 +636,248 @@ function Dashboard() {
                   className="inline-flex items-center gap-1.5 rounded-xl bg-danger px-3 py-2 text-sm font-semibold text-white hover:opacity-90"
                   onDeleted={async () => {
                     const name = selected.name;
-                    const tiles = (await loadProjects()) ?? [];
-                    setSelectedId(tiles.find((t) => t.status === 'active')?.id ?? tiles[0]?.id ?? '');
+                    await loadProjects();
+                    setSelectedId('');
                     flash(`Project "${name}" deleted.`);
                   }}
                 />
               </div>
             </div>
-
-            {/* 4 stat cards */}
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <Stat
-                label="Products (line items)"
-                value={
-                  <>
-                    <span className="text-text-primary">{totals.products.total}</span>
-                    <span className="text-text-muted"> · </span>
-                    <span className="text-success">{totals.products.done}</span>
-                    <span className="text-text-muted"> · </span>
-                    <span className="text-danger">{totals.products.notDone}</span>
-                  </>
-                }
-              />
-              <Stat
-                label="Other agency"
-                value={<span className="text-danger">{totals.otherAgencyPending}</span>}
-              />
-              <Stat
-                label="VTech Installer"
-                value={
-                  <>
-                    <span className="text-text-primary">{totals.installer.total}</span>
-                    <span className="text-text-muted"> · </span>
-                    <span className="text-success">{totals.installer.done}</span>
-                    <span className="text-text-muted"> · </span>
-                    <span className="text-danger">{totals.installer.pending}</span>
-                  </>
-                }
-              />
-              <Stat
-                label="VTech Programmer"
-                value={
-                  <>
-                    <span className="text-text-primary">{totals.programmer.total}</span>
-                    <span className="text-text-muted"> · </span>
-                    <span className="text-success">{totals.programmer.done}</span>
-                    <span className="text-text-muted"> · </span>
-                    <span className="text-danger">{totals.programmer.pending}</span>
-                  </>
-                }
-              />
-            </div>
-            {totals.needsSteps > 0 && (
-              <div className="mt-3 rounded-xl border border-warning/30 bg-warning-light px-4 py-2.5 text-sm text-warning">
-                {totals.needsSteps} BOQ product{totals.needsSteps === 1 ? ' is' : 's are'} not in VTech’s product list. Use “Add dependencies” on {totals.needsSteps === 1 ? 'its row' : 'their rows'}.
-              </div>
-            )}
-
-            {/* filters + sort */}
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-              <GroupingToggle value={sortBy} onChange={setSortBy} />
-              <select aria-label="Status filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="w-full rounded-xl border border-border px-3 py-2 sm:w-auto">
-                <option value="all">All lines ({lines.length})</option>
-                <option value="open">Open lines</option>
-                <option value="stuck">Not done (with a reason)</option>
-                <option value="done">Fully done</option>
-              </select>
-              <select aria-label="Agency filter" value={agencyFilter} onChange={(e) => setAgencyFilter(e.target.value)} className="w-full rounded-xl border border-border px-3 py-2 sm:w-auto sm:max-w-[16rem]">
-                <option value="all">All agencies</option>
-                {agencyOptions.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
-              </select>
-              <input aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search product, room, model…" className="w-full min-w-0 rounded-xl border border-border px-3 py-2 sm:w-auto sm:flex-1 sm:max-w-xs" />
-            </div>
-
-            {/* colour key */}
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-secondary">
-              {LEGEND_ORDER.map((c) => (
-                <span key={c} className="inline-flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: STEP_COLOURS[c].bg, boxShadow: `0 0 0 1px ${STEP_COLOURS[c].ring}` }} />
-                  {STEP_COLOURS[c].legend}
-                </span>
-              ))}
-              <span className="inline-flex items-center gap-1.5">
-                <span className="inline-block h-2.5 w-4 rounded-xs border border-text-muted bg-text-muted" />
-                filled = done
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="inline-block h-2.5 w-4 rounded-xs border border-text-muted bg-transparent" />
-                outlined = open
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="inline-block h-2.5 w-4 rounded-xs border-2 border-text-primary bg-surface" />
-                dark outline = stuck
-              </span>
-            </div>
-
-            {/* matrix */}
-            <div className="mt-4">
-              <div className="hidden grid-cols-[minmax(200px,1.5fr)_minmax(120px,0.9fr)_56px_minmax(280px,2.6fr)] gap-4 border-b border-border px-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-text-secondary md:grid">
-                <span>Product</span><span>Location</span><span className="text-right">Qty</span><span>Status</span>
-              </div>
-              {detailLoading && <div className="flex justify-center py-10"><Spinner /></div>}
-              {!detailLoading && groups.length === 0 && (
-                <p className="py-10 text-center text-sm text-text-secondary">{lines.length ? 'No line matches these filters.' : 'This project has no BOQ lines yet.'}</p>
-              )}
-              {!detailLoading && groups.map((g) => (
-                <div key={g.key} className="mt-4">
-                  <h3 className="flex items-center gap-2 px-1 text-sm font-semibold">
-                    <GlassIcon name={sortBy === 'product' ? 'products' : sortBy === 'agency' ? 'agencies' : 'rooms'} size={24} tint="clear" />
-                    {g.label}{g.sub ? <span className="font-normal text-text-secondary">· {g.sub}</span> : null}
-                    <span className="text-xs font-normal text-text-muted">({g.rows.length})</span>
-                  </h3>
-                  <ul className="mt-2 divide-y divide-border overflow-hidden rounded-xl border border-border">
-                    {g.rows.map(({ line, gate: lg, involved }) => {
-                      const needsSteps = !line.product_id && lg.length === 0;
-                      const spec = [line.brand, line.make, line.model].filter(Boolean).join(' · ');
-                      const defaultStep = lg.find((r) => r.status === 'pending' && !r.locked)
-                        ?? lg.find((r) => !isDone(r.status) && !r.locked)
-                        ?? lg[0];
-                      return (
-                        <li
-                          key={line.id}
-                          data-line={line.id}
-                          onClick={() => { if (!needsSteps && defaultStep) setStepRow(defaultStep); }}
-                          className={`grid grid-cols-1 gap-3 bg-surface px-4 py-3 transition-colors hover:bg-surface-alt/40 md:grid-cols-[minmax(200px,1.5fr)_minmax(120px,0.9fr)_56px_minmax(280px,2.6fr)] md:items-center md:gap-4 ${!needsSteps && defaultStep ? 'cursor-pointer' : ''}`}
-                        >
-                          <div className="min-w-0">
-                            <p className="font-semibold">{titleOf(line)}{!line.product_id && <span className="ml-1.5 rounded bg-warning-light px-1 text-[10px] font-semibold uppercase text-warning">not in list</span>}</p>
-                            {spec && <p className="truncate text-xs text-text-muted">{spec}</p>}
-                            {involved.length > 0 && (
-                              <p className="mt-1 flex items-center gap-1 text-xs text-text-secondary" title={involved.join(', ')}>
-                                <Glyph name="building" className="h-3.5 w-3.5 shrink-0 text-text-muted" />
-                                <span className="truncate">Waiting on {involved.slice(0, 2).join(', ')}{involved.length > 2 ? ` +${involved.length - 2}` : ''}</span>
-                              </p>
-                            )}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-text-primary truncate">
-                              {roomById.get(line.room_id)?.name ?? '—'}
-                            </p>
-                            <p className="text-xs text-text-muted truncate">
-                              {line.location || '—'}
-                            </p>
-                          </div>
-                          <div className="text-sm tabular-nums md:text-right"><span className="md:hidden text-xs text-text-muted">Qty: </span>{line.quantity}</div>
-                          <div className="min-w-0">
-                            {needsSteps ? (
-                              <button type="button" onClick={(e) => { e.stopPropagation(); setCustomFor(line); }} className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white">
-                                <Glyph name="plus" /> Add dependencies
-                              </button>
-                            ) : (
-                              <SegmentedColorBar
-                                steps={lg}
-                                onOpen={(r) => setStepRow(r)}
-                              />
-                            )}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ))}
-            </div>
           </section>
         )}
+
+        {/* 4 stat cards */}
+        <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Stat
+            label="Products (line items)"
+            value={
+              <>
+                <span className="text-text-primary">{totals.products.total}</span>
+                <span className="text-text-muted"> · </span>
+                <span className="text-success">{totals.products.done}</span>
+                <span className="text-text-muted"> · </span>
+                <span className="text-danger">{totals.products.notDone}</span>
+              </>
+            }
+          />
+          <Stat
+            label="Other agency"
+            value={<span className="text-danger">{totals.otherAgencyPending}</span>}
+          />
+          <Stat
+            label="VTech Installer"
+            value={
+              <>
+                <span className="text-text-primary">{totals.installer.total}</span>
+                <span className="text-text-muted"> · </span>
+                <span className="text-success">{totals.installer.done}</span>
+                <span className="text-text-muted"> · </span>
+                <span className="text-danger">{totals.installer.pending}</span>
+              </>
+            }
+          />
+          <Stat
+            label="VTech Programmer"
+            value={
+              <>
+                <span className="text-text-primary">{totals.programmer.total}</span>
+                <span className="text-text-muted"> · </span>
+                <span className="text-success">{totals.programmer.done}</span>
+                <span className="text-text-muted"> · </span>
+                <span className="text-danger">{totals.programmer.pending}</span>
+              </>
+            }
+          />
+        </div>
+
+        {totals.needsSteps > 0 && (
+          <div className="mt-3 rounded-xl border border-warning/30 bg-warning-light px-4 py-2.5 text-sm text-warning">
+            {totals.needsSteps} BOQ product{totals.needsSteps === 1 ? ' is' : 's are'} not in VTech’s product list. Use “Add dependencies” on {totals.needsSteps === 1 ? 'its row' : 'their rows'}.
+          </div>
+        )}
+
+        {/* filters + sort */}
+        <div className="mt-6 flex flex-wrap items-center gap-2 text-sm">
+          <GroupingToggle value={sortBy} onChange={setSortBy} />
+          <select aria-label="Status filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="w-full rounded-xl border border-border px-3 py-2 sm:w-auto">
+            <option value="open">Being worked on ({rows.length})</option>
+            <option value="all">All lines ({activeLines.length})</option>
+            <option value="stuck">Stuck with a reason</option>
+            <option value="done">Fully done</option>
+          </select>
+          <select aria-label="Agency filter" value={agencyFilter} onChange={(e) => setAgencyFilter(e.target.value)} className="w-full rounded-xl border border-border px-3 py-2 sm:w-auto sm:max-w-[16rem]">
+            <option value="all">All agencies</option>
+            {agencyOptions.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+          </select>
+          <input aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search product, room, model…" className="w-full min-w-0 rounded-xl border border-border px-3 py-2 sm:w-auto sm:flex-1 sm:max-w-xs" />
+        </div>
+
+        {/* colour key */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-secondary">
+          {LEGEND_ORDER.map((c) => (
+            <span key={c} className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: STEP_COLOURS[c].bg, boxShadow: `0 0 0 1px ${STEP_COLOURS[c].ring}` }} />
+              {STEP_COLOURS[c].legend}
+            </span>
+          ))}
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-4 rounded-xs border border-text-muted bg-text-muted" />
+            ✓ = done
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-4 rounded-xs border-2 border-text-primary bg-surface" />
+            ✗ = being worked on
+          </span>
+        </div>
+
+        {/* ── Lines Matrix ── */}
+        <div className="mt-4">
+          <div className="hidden grid-cols-[minmax(200px,1.5fr)_minmax(120px,0.9fr)_56px_minmax(280px,2.6fr)] gap-4 border-b border-border px-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-text-secondary md:grid">
+            <span>Product</span><span>Location</span><span className="text-right">Qty</span><span>Status</span>
+          </div>
+          {detailLoading && <div className="flex justify-center py-10"><Spinner /></div>}
+          {!detailLoading && rows.length === 0 && (
+            <p className="py-10 text-center text-sm text-text-secondary">No lines matching these filters.</p>
+          )}
+
+          {!detailLoading && (
+            <div className="space-y-6">
+              {groupedProjects.map((pGroup) => {
+                const subGroups = groupRows(pGroup.rows);
+                return (
+                  <div key={pGroup.project.id} className="mt-6 rounded-2xl border border-border bg-surface p-4 sm:p-5">
+                    {/* Project group header: bold, 18px, heavy */}
+                    <div className="flex items-center justify-between pb-3 border-b border-border/80">
+                      <div className="flex items-center gap-2.5">
+                        <GlassIcon name="building" size={26} tint="clear" />
+                        <h2 className="text-[18px] font-extrabold text-text-primary">
+                          {pGroup.project.name}
+                        </h2>
+                        <span className="rounded-md bg-surface-alt px-2 py-0.5 text-xs font-semibold text-text-secondary">
+                          {pGroup.rows.length} {pGroup.rows.length === 1 ? 'line' : 'lines'}
+                        </span>
+                      </div>
+                      {!selectedId && (
+                        <button
+                          type="button"
+                          onClick={() => handleSelectProject(pGroup.project.id)}
+                          className="text-xs font-semibold text-accent hover:underline"
+                        >
+                          Focus project →
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Sub groups inside project */}
+                    <div className="space-y-4 mt-3">
+                      {subGroups.map((g) => (
+                        <div key={g.key}>
+                          <h3 className="flex items-center gap-2 px-1 text-sm font-semibold">
+                            <GlassIcon name={sortBy === 'product' ? 'products' : sortBy === 'agency' ? 'agencies' : 'rooms'} size={20} tint="clear" />
+                            {g.label}{g.sub ? <span className="font-normal text-text-secondary">· {g.sub}</span> : null}
+                            <span className="text-xs font-normal text-text-muted">({g.rows.length})</span>
+                          </h3>
+                          <ul className="mt-2 divide-y divide-border overflow-hidden rounded-xl border border-border">
+                            {g.rows.map(({ line, gate: lg, currentStep, waitingOnAgency }) => {
+                              const needsSteps = !line.product_id && lg.length === 0;
+                              const spec = [line.brand, line.make, line.model].filter(Boolean).join(' · ');
+                              const targetStep = currentStep ?? lg[0];
+                              return (
+                                <li
+                                  key={line.id}
+                                  data-line={line.id}
+                                  onClick={() => { if (!needsSteps && targetStep) setStepRow(targetStep); }}
+                                  className={`grid grid-cols-1 gap-3 bg-surface px-4 py-3 transition-colors hover:bg-surface-alt/40 md:grid-cols-[minmax(200px,1.5fr)_minmax(120px,0.9fr)_56px_minmax(280px,2.6fr)] md:items-center md:gap-4 ${!needsSteps && targetStep ? 'cursor-pointer' : ''}`}
+                                >
+                                  {/* Product column */}
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-text-primary">
+                                      {titleOf(line)}
+                                      {!line.product_id && <span className="ml-1.5 rounded bg-warning-light px-1 text-[10px] font-semibold uppercase text-warning">not in list</span>}
+                                    </p>
+                                    {spec && <p className="truncate text-xs text-text-muted">{spec}</p>}
+                                    {waitingOnAgency && (
+                                      <p className="mt-1 flex items-center gap-1 text-xs text-text-secondary" title={waitingOnAgency}>
+                                        <Glyph name="building" className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+                                        <span className="truncate">Waiting on {waitingOnAgency}</span>
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  {/* Location column: Room-wise has location main; Agency & Product have room big, location small */}
+                                  <div className="min-w-0">
+                                    {sortBy === 'room' ? (
+                                      <p className="text-sm font-semibold text-text-primary truncate">
+                                        {line.location || '—'}
+                                      </p>
+                                    ) : (
+                                      <>
+                                        <p className="text-sm font-semibold text-text-primary truncate">
+                                          {roomById.get(line.room_id)?.name ?? '—'}
+                                        </p>
+                                        <p className="text-xs text-text-muted truncate">
+                                          {line.location || '—'}
+                                        </p>
+                                      </>
+                                    )}
+                                  </div>
+
+                                  {/* Qty column */}
+                                  <div className="text-sm tabular-nums md:text-right">
+                                    <span className="md:hidden text-xs text-text-muted">Qty: </span>{line.quantity}
+                                  </div>
+
+                                  {/* Status column: current step label + colour + SegmentedColorBar */}
+                                  <div className="min-w-0">
+                                    {needsSteps ? (
+                                      <button type="button" onClick={(e) => { e.stopPropagation(); setCustomFor(line); }} className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white">
+                                        <Glyph name="plus" /> Add dependencies
+                                      </button>
+                                    ) : (
+                                      <div className="flex flex-col gap-1.5">
+                                        {currentStep && (
+                                          <div className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
+                                            <span
+                                              className="h-2 w-2 rounded-full shrink-0"
+                                              style={{ background: stepColour(currentStep.sheet_colour).bg, boxShadow: `0 0 0 1px ${stepColour(currentStep.sheet_colour).ring}` }}
+                                            />
+                                            <span className="truncate text-text-primary font-semibold">{currentStep.label}</span>
+                                          </div>
+                                        )}
+                                        <SegmentedColorBar
+                                          steps={lg}
+                                          onOpen={(r) => setStepRow(r)}
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </main>
+
+      {/* Floating buttons: "Send reminders" stacked 12px above "Add dependency" at bottom-right */}
+      <button
+        type="button"
+        onClick={sendReminders}
+        disabled={busy === 'remind'}
+        aria-label="Send reminders"
+        className="fixed bottom-[82px] right-6 z-40 flex items-center gap-2 rounded-full bg-accent py-2 pl-3 pr-4 text-sm font-semibold text-white shadow-xl transition hover:scale-105 active:scale-95 disabled:opacity-50"
+      >
+        <Glyph name="send" className="h-4 w-4" />
+        <span className="hidden sm:inline">Send reminders</span>
+        <span className="sm:hidden text-xs">Reminders</span>
+      </button>
 
       {stepRow && (
         <StepDialog
@@ -759,7 +901,7 @@ function Dashboard() {
       {editing && selected && (
         <EditProjectDialog
           project={{ id: selected.id, name: selected.name, client_name: selected.client_name, site_address: selected.site_address, status: selected.status }}
-          lines={lines.map((l) => ({ id: l.id, title: titleOf(l), room: where(l.room_id), location: l.location, quantity: l.quantity, brand: l.brand, make: l.make, model: l.model }))}
+          lines={activeLines.filter((l) => l.project_id === selected.id).map((l) => ({ id: l.id, title: titleOf(l), room: where(l.room_id), location: l.location, quantity: l.quantity, brand: l.brand, make: l.make, model: l.model }))}
           onClose={() => setEditing(false)}
           onSaved={async (msg) => { setEditing(false); flash(msg); await refresh(); }}
         />
@@ -768,12 +910,19 @@ function Dashboard() {
   );
 }
 
-/** Segmented colour bar: one segment per step, coloured by sheet_colour; filled = done/N.A., outlined = open, faded = locked; the current stuck step has a 2px dark outline. Each segment shows a tiny ✓ or ✗ for done or pending/stuck. */
+/** Segmented colour bar: one segment per step, coloured by sheet_colour.
+ * Every line always shows exactly one ✗ = the step being worked on now:
+ * the first step (sheet order) that is open and not Done/N.A.
+ * When marked Done, the ✗ moves to the next open step automatically. Done steps show ✓.
+ * Locked/untouched steps show no mark.
+ */
 function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: GateRow) => void }) {
   const ordered = [...steps].sort((a, b) => a.seq - b.seq);
   if (ordered.length === 0) return null;
 
   const doneCount = ordered.filter((r) => isDone(r.status)).length;
+  // The first step (sheet order) that is open and not Done/N.A.
+  const currentStep = ordered.find((r) => !isDone(r.status) && !r.locked);
 
   return (
     <div className="flex items-center gap-2">
@@ -783,8 +932,9 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
           const done = isDone(r.status);
           const locked = r.locked && !done;
           const isStuck = r.status === 'pending';
+          const isCurrent = currentStep ? r.item_id === currentStep.item_id : false;
 
-          const tip = `${r.label}${done ? ' (done)' : isStuck ? ` (stuck: ${r.stuck_reason || 'not done'})` : locked ? ' (locked)' : ' (open)'}`;
+          const tip = `${r.label}${done ? ' (done)' : isCurrent ? ` (being worked on${r.stuck_reason ? `: ${r.stuck_reason}` : ''})` : isStuck ? ` (stuck: ${r.stuck_reason || 'not done'})` : locked ? ' (locked)' : ' (open)'}`;
           const markColor = c.text === '#FFFFFF' ? '#ffffff' : '#0f172a';
 
           return (
@@ -801,9 +951,9 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
                 locked ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'
               }`}
               style={{
-                backgroundColor: done || isStuck ? c.bg : locked ? c.bg : 'transparent',
-                borderColor: isStuck ? '#0f172a' : done ? c.ring : locked ? 'transparent' : c.ring,
-                borderWidth: isStuck ? '2px' : done ? '1px' : locked ? '0px' : '2px',
+                backgroundColor: done || isStuck || isCurrent ? c.bg : locked ? c.bg : 'transparent',
+                borderColor: isStuck ? '#0f172a' : isCurrent ? '#0f172a' : done ? c.ring : locked ? 'transparent' : c.ring,
+                borderWidth: isStuck || isCurrent ? '2px' : done ? '1px' : locked ? '0px' : '2px',
                 borderStyle: 'solid',
                 boxShadow: isStuck ? '0 0 0 1px #0f172a' : undefined,
               }}
@@ -823,7 +973,7 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
                 >
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
-              ) : isStuck ? (
+              ) : isCurrent ? (
                 <svg
                   viewBox="0 0 24 24"
                   width="10"
