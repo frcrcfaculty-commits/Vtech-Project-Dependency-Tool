@@ -507,6 +507,19 @@ export default function PendingPage() {
   const handleClearSelection = () => setSelectedItemIds(new Set());
 
   // Individual Reminders drawer trigger
+  // Recipient groups for a single-item send = the agency types of the selected items that are valid "All dependencies" recipients.
+  const recipientTypesFor = async (projectId: string, itemIds: string[]): Promise<string[]> => {
+    const res = await fetch(`/api/projects/${projectId}/reminder-categories`);
+    if (!res.ok) throw new Error('Could not load reminder recipients');
+    const cats = (await res.json()) as { key: string; recipients: { agencyTypeId: string }[] }[];
+    const allowed = new Set(cats.find((c) => c.key === 'all')?.recipients.map((r) => r.agencyTypeId) ?? []);
+    const ids = [...new Set(items.filter((i) => itemIds.includes(i.id))
+      .map((i) => i.agencies?.agency_types?.id)
+      .filter((x): x is string => !!x && allowed.has(x)))];
+    if (!ids.length) throw new Error('The selected items have no agency assigned from the 7 reminder groups. Assign an agency first.');
+    return ids;
+  };
+
   const handleOpenReminderDrawer = async (channel: 'whatsapp' | 'email') => {
     if (selectedItemIds.size === 0) return;
     setDrawerChannel(channel);
@@ -537,7 +550,7 @@ export default function PendingPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             category: 'all',
-            agencyTypeIds: ['client', 'pmc', 'ele', 'carp', 'sales', 'inst', 'prog'],
+            agencyTypeIds: await recipientTypesFor(projectId, pData.itemIds),
             channel,
             preview: true,
             itemIds: pData.itemIds,
@@ -601,7 +614,7 @@ export default function PendingPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             category: 'all',
-            agencyTypeIds: ['client', 'pmc', 'ele', 'carp', 'sales', 'inst', 'prog'],
+            agencyTypeIds: await recipientTypesFor(projectId, pItemIds),
             channel: drawerChannel,
             preview: false,
             itemIds: pItemIds,
