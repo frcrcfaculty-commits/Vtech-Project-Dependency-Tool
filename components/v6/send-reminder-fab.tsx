@@ -71,7 +71,7 @@ export function SendReminderFab() {
         type="button"
         aria-label="Send reminders"
         onClick={handleClick}
-        className="fixed bottom-20 right-6 sm:bottom-6 sm:right-52 z-40 flex items-center gap-2 rounded-full bg-accent py-2 pl-2 pr-4 text-sm font-semibold text-white shadow-xl transition hover:scale-105 active:scale-95"
+        className="fixed bottom-20 right-6 z-40 flex items-center gap-2 rounded-full bg-accent py-2 pl-2 pr-4 text-sm font-semibold text-white shadow-xl transition hover:scale-105 active:scale-95"
       >
         <GlassIcon name="send" size={30} tint="clear" />
         <span className="hidden sm:inline">Send reminders</span>
