@@ -551,6 +551,8 @@ export default function PendingPage() {
           body: JSON.stringify({
             category: 'all',
             agencyTypeIds: await recipientTypesFor(projectId, pData.itemIds),
+            // only the agencies the selected items are assigned to (not every agency of that type)
+            agencyIds: [...new Set(items.filter((i) => pData.itemIds.includes(i.id)).map((i) => i.agencies?.id).filter((x): x is string => !!x))],
             channel,
             preview: true,
             itemIds: pData.itemIds,
@@ -615,6 +617,8 @@ export default function PendingPage() {
           body: JSON.stringify({
             category: 'all',
             agencyTypeIds: await recipientTypesFor(projectId, pItemIds),
+            // only the agencies the selected items are assigned to (not every agency of that type)
+            agencyIds: [...new Set(items.filter((i) => pItemIds.includes(i.id)).map((i) => i.agencies?.id).filter((x): x is string => !!x))],
             channel: drawerChannel,
             preview: false,
             itemIds: pItemIds,

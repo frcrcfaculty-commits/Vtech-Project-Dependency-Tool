@@ -53,7 +53,7 @@ export async function loadCategories(db: Db, projectId: string): Promise<Categor
   }));
 }
 
-export interface RoundInput { category: string; agencyTypeIds: string[]; channel: Channel; preview?: boolean; itemIds?: string[] }
+export interface RoundInput { category: string; agencyTypeIds: string[]; channel: Channel; preview?: boolean; itemIds?: string[]; agencyIds?: string[] }
 
 /** Validates the request body; throws 400 with a plain message. */
 export function parseRoundInput(body: unknown): RoundInput {
@@ -62,11 +62,15 @@ export function parseRoundInput(body: unknown): RoundInput {
   if (!Array.isArray(b.agencyTypeIds) || !b.agencyTypeIds.length || !b.agencyTypeIds.every((x) => typeof x === 'string'))
     throw new HttpError(400, 'Tick at least one recipient group');
   if (b.channel !== 'email' && b.channel !== 'whatsapp') throw new HttpError(400, "channel must be 'email' or 'whatsapp'");
-  if (b.itemIds !== undefined && (!Array.isArray(b.itemIds) || !b.itemIds.length || !b.itemIds.every((x) => typeof x === 'string')))
-    throw new HttpError(400, 'itemIds must be a non-empty list of item ids');
+  for (const k of ['itemIds', 'agencyIds'] as const) {
+    const v = b[k];
+    if (v !== undefined && (!Array.isArray(v) || !v.length || !v.every((x) => typeof x === 'string')))
+      throw new HttpError(400, `${k} must be a non-empty list of ids`);
+  }
   return {
     category: b.category, agencyTypeIds: [...new Set(b.agencyTypeIds as string[])], channel: b.channel, preview: b.preview === true,
     ...(b.itemIds ? { itemIds: [...new Set(b.itemIds as string[])] } : {}),
+    ...(b.agencyIds ? { agencyIds: [...new Set(b.agencyIds as string[])] } : {}),
   };
 }
 
@@ -160,7 +164,7 @@ export async function runRound(db: Db, me: Me, projectId: string, input: RoundIn
     date: todayIst(), category: cat.label,
     groups: input.agencyTypeIds.map((id) => typeById.get(id)).filter((t): t is { id: string; name: string; internal: boolean } => !!t)
       .map((t) => ({ agencyTypeId: t.id, name: t.name, internal: t.internal })),
-    agencies: agencies.map((a) => ({ id: a.id, companyName: a.company_name, agencyTypeId: a.agency_type_id, contacts: a.agency_contacts })),
+    agencies: agencies.filter((a) => !input.agencyIds || input.agencyIds.includes(a.id)).map((a) => ({ id: a.id, companyName: a.company_name, agencyTypeId: a.agency_type_id, contacts: a.agency_contacts })),
     items, pm: { name: me.fullName, email: me.email, phone: me.phone },
   });
 
