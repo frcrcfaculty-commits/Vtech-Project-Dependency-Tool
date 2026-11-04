@@ -76,6 +76,7 @@ describe('parseRoundInput', () => {
   it('accepts itemIds for single-item reminders from the Pending page', () => {
     expect(parseRoundInput({ category: 'all', agencyTypeIds: ['a'], channel: 'whatsapp', itemIds: ['i1', 'i1'] }).itemIds).toEqual(['i1']);
     expect(() => parseRoundInput({ category: 'all', agencyTypeIds: ['a'], channel: 'whatsapp', itemIds: [] })).toThrow();
+    expect(parseRoundInput({ category: 'all', agencyTypeIds: ['a'], channel: 'email', agencyIds: ['x', 'x'] }).agencyIds).toEqual(['x']);
   });
   it('rejects bad input with 400', () => {
     for (const b of [null, {}, { category: 'all', agencyTypeIds: [], channel: 'email' }, { category: 'all', agencyTypeIds: ['a'], channel: 'sms' }]) {
