@@ -727,9 +727,9 @@ export default function ProjectRemindersPage({
             </svg>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* ────────────────────── LEFT COLUMN: 3 BOXES ────────────────────── */}
-            <div className="lg:col-span-7 xl:col-span-8 space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
+            {/* ────────────────────── LEFT COLUMN (40%): 3 BOXES ────────────────────── */}
+            <div className="lg:col-span-2 space-y-5">
               {sections.map((sec) => {
                 if (sec.categories.length === 0) return null;
                 const totalPending = sec.categories.reduce((acc, c) => acc + c.itemCount, 0);
@@ -772,6 +772,83 @@ export default function ProjectRemindersPage({
                             (r) => r.agencies.length > 0 && catSelectedRecipients.has(r.agencyTypeId)
                           );
                         const isSendingThisCat = sendingState?.key === cat.key;
+
+                        if (cat.key === 'all') {
+                          return (
+                            <div
+                              key={cat.key}
+                              onClick={() => setFocusedCategoryKey(cat.key)}
+                              className={`p-3.5 transition-colors cursor-pointer flex flex-col gap-3 ${
+                                isFocused
+                                  ? 'bg-accent/5 ring-1 ring-inset ring-accent/30'
+                                  : 'hover:bg-surface-alt/40'
+                              }`}
+                            >
+                              {/* Label + count on its own line */}
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${chipStyle.bg} ${chipStyle.text} ${chipStyle.border}`}
+                                  >
+                                    {cat.label}
+                                  </span>
+                                  <span
+                                    className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                                      cat.itemCount > 0
+                                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                        : 'bg-surface-alt text-text-muted border border-border'
+                                    }`}
+                                  >
+                                    {cat.itemCount} pending
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Groups on multiple lines (2 columns of checkboxes) */}
+                              <div
+                                className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-2"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {cat.recipients.map((rg) => {
+                                  const isChecked = catSelectedRecipients.has(rg.agencyTypeId);
+                                  const hasAgencies = rg.agencies.length > 0;
+                                  const displayName = formatRecipientName(rg.name, cat.section);
+                                  return (
+                                    <label
+                                      key={rg.agencyTypeId}
+                                      title={
+                                        !hasAgencies
+                                          ? `${rg.name} (not added to project)`
+                                          : rg.name
+                                      }
+                                      className={`inline-flex items-center gap-1.5 text-xs select-none transition-opacity ${
+                                        !hasAgencies
+                                          ? 'opacity-40 cursor-not-allowed text-text-muted'
+                                          : 'cursor-pointer text-text-secondary hover:text-text-primary'
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        disabled={!hasAgencies}
+                                        checked={isChecked}
+                                        onChange={() => toggleRecipient(cat.key, rg.agencyTypeId)}
+                                        className="h-3.5 w-3.5 rounded border-border text-accent focus:ring-accent disabled:cursor-not-allowed shrink-0"
+                                      />
+                                      <span className={`truncate ${isChecked ? 'font-semibold text-text-primary' : ''}`}>
+                                        {displayName}
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Buttons on their own line */}
+                              <div className="pt-2 border-t border-border/40 flex items-center justify-end gap-1.5">
+                                {renderActionButtons(cat, isFocused, hasPending, isSendingThisCat)}
+                              </div>
+                            </div>
+                          );
+                        }
 
                         return (
                           <div
@@ -862,8 +939,8 @@ export default function ProjectRemindersPage({
               })}
             </div>
 
-            {/* ────────────────────── RIGHT COLUMN: STICKY PREVIEW (DESKTOP) ────────────────────── */}
-            <div className="hidden lg:block lg:col-span-5 xl:col-span-4 sticky top-6 space-y-4">
+            {/* ────────────────────── RIGHT COLUMN (60%): STICKY PREVIEW (DESKTOP) ────────────────────── */}
+            <div className="hidden lg:block lg:col-span-3 sticky top-6 space-y-4">
               <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm space-y-3">
                 <div className="flex items-center justify-between border-b border-border/70 pb-3">
                   <div>

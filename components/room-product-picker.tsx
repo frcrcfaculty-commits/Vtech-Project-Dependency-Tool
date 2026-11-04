@@ -58,6 +58,16 @@ interface PlacedRoomProduct {
   rooms?: { id: string; name: string; floor_id: string };
 }
 
+const COMMON_LOCATIONS = [
+  'Entrance', 'Bedside', 'Ceiling', 'Wall', 'Floor', 'Window', 'TV Unit', 'Door', 'Wardrobe', 'Balcony', 'Kitchen', 'Bathroom', 'Passage', 'Other'
+];
+const COMMON_MAKES = [
+  'VTech', 'Lutron', 'Crestron', 'Sonance', 'Apple', 'Samsung', 'Sony', 'Philips', 'Daikin', 'Somfy', 'Other'
+];
+const COMMON_MODELS = [
+  'Standard', 'Custom', 'Pro', 'Elite', 'Series 1', 'Series 2', '2-Channel', '4-Channel', '8-Channel', 'Other'
+];
+
 export function getStepDotColor(sheetColour?: string | null): { bg: string; border: string; text: string; label: string } {
   const c = sheetColour?.toUpperCase().trim();
   if (c === 'D9EAD3') return { bg: '#D9EAD3', border: '#B7D7B0', text: '#274E13', label: 'Other agencies (green)' };
@@ -97,6 +107,13 @@ export function RoomProductPicker({
 
   // Search filter
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Add Product Row state (starts as '--' / empty, no default Entrance)
+  const [curProductId, setCurProductId] = useState('');
+  const [curLocation, setCurLocation] = useState('');
+  const [curMake, setCurMake] = useState('');
+  const [curModel, setCurModel] = useState('');
+  const [curOther, setCurOther] = useState('');
 
   // Per-product configuration state in the catalog list: { [productId]: { location: string, customLocation: string, quantity: number } }
   const [productConfigs, setProductConfigs] = useState<
@@ -291,39 +308,44 @@ export function RoomProductPicker({
   }, [products, isProjectWide, searchQuery]);
 
   // Add product to current room or project
-  const handleAddProduct = async (product: ProductItem) => {
+  const handleAddProduct = async () => {
     if (!isProjectWide && !activeRoomId) return;
+    if (!curProductId || !curLocation || curProductId === '--' || curLocation === '--') return;
     setSaving(true);
     setError(null);
     try {
       const sb = supabaseBrowser();
-      const cfg = productConfigs[product.id] ?? {
-        location: product.location_options?.[0] ?? '',
-        customLocation: '',
-        quantity: 1,
-      };
-
-      const finalLocation =
-        cfg.location === '__custom__' || cfg.location === 'Other'
-          ? cfg.customLocation.trim() || 'Other'
-          : cfg.location || null;
-
-      const qty = Math.max(1, cfg.quantity || 1);
+      const finalLocation = curLocation === '--' ? null : curLocation;
 
       const { data: newRpId, error: rpcErr } = await sb.rpc('add_room_product', {
         p_project: projectId,
         p_room: isProjectWide ? null : activeRoomId,
-        p_product: product.id,
+        p_product: curProductId,
         p_location: finalLocation,
-        p_quantity: qty,
+        p_quantity: 1,
       });
 
       if (rpcErr) throw rpcErr;
 
+      if (newRpId && (curMake || curModel || curOther)) {
+        await sb.from('room_products').update({
+          make: curMake && curMake !== '--' ? curMake : null,
+          model: curModel && curModel !== '--' ? curModel : null,
+          note: curOther.trim() || null,
+        }).eq('id', newRpId);
+      }
+
+      // Reset to '--'
+      setCurProductId('');
+      setCurLocation('');
+      setCurMake('');
+      setCurModel('');
+      setCurOther('');
+
       // Reload placed products and item_gate
       await refreshPlacedAndGate();
 
-      showSuccessNotice(`Added ${product.title}${finalLocation ? ` (${finalLocation})` : ''} to room`);
+      showSuccessNotice('Product added');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add product');
     } finally {
@@ -714,166 +736,88 @@ export function RoomProductPicker({
           </div>
         </div>
 
-        {/* Legend strip */}
-        <div className="flex flex-wrap items-center gap-3 bg-surface-alt p-2.5 rounded-xl border border-border/60 text-[11px] text-text-secondary">
-          <span className="font-semibold text-text-primary">Step Colour Legend:</span>
-          <span className="flex items-center gap-1">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#D9EAD3] border border-[#B7D7B0]" />
-            <span>Other agencies (green)</span>
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#C9DAF8] border border-[#A4C2F4]" />
-            <span>Other agencies (blue)</span>
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#E06666] border border-[#CC0000]" />
-            <span>Installers (dark red)</span>
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#F4CCCC] border border-[#EA9999]" />
-            <span>Programmers (light red)</span>
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#9900FF] border border-[#6B00B3]" />
-            <span>Electrician (purple)</span>
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#FF00FF] border border-[#C000C0]" />
-            <span>VTECH Sales (magenta)</span>
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#F9CB9C] border border-[#F6B26B]" />
-            <span>VTECH Sales, handover docs (orange)</span>
-          </span>
-        </div>
+        {/* Add Product Row (sheet tab "Pending Page" row 12) */}
+        <div className="rounded-xl border border-border bg-surface p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-text-primary">
+              Add product to {currentRoom?.name ?? 'room'}
+            </h4>
+          </div>
 
-        {/* Products List (One-line rows, ≤ 44px tall, text 13px, padding 6px, divide-y divide-border) */}
-        <div className="divide-y divide-border rounded-xl border border-border overflow-hidden bg-surface">
-          {filteredProducts.map((p) => {
-            const pSteps = stepsByProduct.get(p.id) ?? [];
-            const cfg = productConfigs[p.id] ?? {
-              location: p.location_options?.[0] ?? '',
-              customLocation: '',
-              quantity: 1,
-            };
+          {/* Aligned CSS Grid: Product · Location · Make · Model · Other · [Add] */}
+          <div className="grid grid-cols-1 sm:grid-cols-[1.2fr_1fr_1fr_1fr_1.2fr_auto] gap-2 items-center">
+            {/* 1. Product dropdown */}
+            <select
+              aria-label="Product"
+              value={curProductId}
+              onChange={(e) => setCurProductId(e.target.value)}
+              className="w-full rounded-lg border border-border px-2.5 py-2 text-xs bg-surface focus:border-accent"
+            >
+              <option value="">-- Product --</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>{p.title}</option>
+              ))}
+            </select>
 
-            const isCustomLoc = cfg.location === '__custom__' || cfg.location === 'Other';
+            {/* 2. Location dropdown */}
+            <select
+              aria-label="Location"
+              value={curLocation}
+              onChange={(e) => setCurLocation(e.target.value)}
+              className="w-full rounded-lg border border-border px-2.5 py-2 text-xs bg-surface focus:border-accent"
+            >
+              <option value="">-- Location --</option>
+              {COMMON_LOCATIONS.map((loc) => (
+                <option key={loc} value={loc}>{loc}</option>
+              ))}
+            </select>
 
-            return (
-              <div
-                key={p.id}
-                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5 px-3 text-[13px] bg-surface hover:bg-surface-alt/40 transition-colors sm:flex-nowrap sm:h-10"
-              >
-                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0 flex-1">
-                  <span
-                    className="font-semibold text-text-primary truncate min-w-[120px] max-w-[200px]"
-                    title={p.title}
-                  >
-                    {p.title}
-                  </span>
+            {/* 3. Make dropdown */}
+            <select
+              aria-label="Make"
+              value={curMake}
+              onChange={(e) => setCurMake(e.target.value)}
+              className="w-full rounded-lg border border-border px-2.5 py-2 text-xs bg-surface focus:border-accent"
+            >
+              <option value="">-- Make --</option>
+              {COMMON_MAKES.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
 
-                  {!isProjectWide && (
-                    <div className="flex items-center gap-1.5">
-                      <select
-                        value={cfg.location}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setProductConfigs((prev) => ({
-                            ...prev,
-                            [p.id]: { ...(prev[p.id] ?? cfg), location: val },
-                          }));
-                        }}
-                        className="h-7 rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-primary focus:border-accent"
-                      >
-                        {(p.location_options ?? []).map((loc) => (
-                          <option key={loc} value={loc}>
-                            {loc}
-                          </option>
-                        ))}
-                        <option value="__custom__">Other…</option>
-                      </select>
-                      {isCustomLoc && (
-                        <input
-                          type="text"
-                          placeholder="Other location…"
-                          value={cfg.customLocation}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setProductConfigs((prev) => ({
-                              ...prev,
-                              [p.id]: { ...(prev[p.id] ?? cfg), customLocation: val },
-                            }));
-                          }}
-                          className="h-7 w-28 rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-primary focus:border-accent"
-                        />
-                      )}
-                    </div>
-                  )}
+            {/* 4. Model dropdown */}
+            <select
+              aria-label="Model"
+              value={curModel}
+              onChange={(e) => setCurModel(e.target.value)}
+              className="w-full rounded-lg border border-border px-2.5 py-2 text-xs bg-surface focus:border-accent"
+            >
+              <option value="">-- Model --</option>
+              {COMMON_MODELS.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
 
-                  {!isProjectWide && (
-                    <div className="inline-flex items-center rounded-md border border-border bg-surface-alt/60">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newQty = Math.max(1, (cfg.quantity || 1) - 1);
-                          setProductConfigs((prev) => ({
-                            ...prev,
-                            [p.id]: { ...(prev[p.id] ?? cfg), quantity: newQty },
-                          }));
-                        }}
-                        className="h-6 w-6 flex items-center justify-center text-xs font-bold text-text-secondary hover:text-text-primary"
-                      >
-                        −
-                      </button>
-                      <span className="min-w-[18px] text-center text-xs font-bold tabular-nums text-text-primary">
-                        {cfg.quantity || 1}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newQty = (cfg.quantity || 1) + 1;
-                          setProductConfigs((prev) => ({
-                            ...prev,
-                            [p.id]: { ...(prev[p.id] ?? cfg), quantity: newQty },
-                          }));
-                        }}
-                        className="h-6 w-6 flex items-center justify-center text-xs font-bold text-text-secondary hover:text-text-primary"
-                      >
-                        +
-                      </button>
-                    </div>
-                  )}
+            {/* 5. Other / Note text */}
+            <input
+              aria-label="Other / note"
+              type="text"
+              placeholder="Other / note"
+              value={curOther}
+              onChange={(e) => setCurOther(e.target.value)}
+              className="w-full rounded-lg border border-border px-2.5 py-2 text-xs bg-surface focus:border-accent"
+            />
 
-                  {/* Step-chain dots */}
-                  <div className="flex items-center gap-1 shrink-0" title={`${pSteps.length} steps`}>
-                    {pSteps.map((st) => {
-                      const col = stepColour(st.sheet_colour);
-                      return (
-                        <span
-                          key={st.id}
-                          title={st.label}
-                          className="h-2 w-2 rounded-full shrink-0"
-                          style={{
-                            backgroundColor: col.bg,
-                            boxShadow: `0 0 0 1px ${col.ring}`,
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => handleAddProduct(p)}
-                  className="h-7 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-white hover:bg-accent-hover transition-colors disabled:opacity-50"
-                >
-                  Add
-                </button>
-              </div>
-            );
-          })}
+            {/* 6. Add button */}
+            <button
+              type="button"
+              disabled={saving || !curProductId || !curLocation || curProductId === '--' || curLocation === '--'}
+              onClick={handleAddProduct}
+              className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-white hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+            >
+              {saving ? 'Adding…' : 'Add'}
+            </button>
+          </div>
         </div>
       </div>
 
