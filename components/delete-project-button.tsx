@@ -97,7 +97,7 @@ export function DeleteProjectButton({
             <p className="mt-2 text-sm text-text-secondary">
               This deletes <span className="font-semibold text-text-primary">{projectName}</span> with all its floors, rooms,
               dependencies, products, history, visits, reminder drafts and photos. <span className="font-semibold">It cannot be undone.</span>{' '}
-              To keep the record instead, use Close Project.
+              To keep the record instead, mark it finished in Edit project.
             </p>
             <label htmlFor="delete-project-confirm" className="mt-4 block text-xs font-semibold uppercase tracking-wider text-text-secondary">
               Type the project name to confirm
