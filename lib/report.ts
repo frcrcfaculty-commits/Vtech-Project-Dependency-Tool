@@ -27,6 +27,8 @@ export interface ReportItem {
   note: string | null;
   /** Who the item waits on (agency type), shown in category reminders. */
   owner?: string | null;
+  /** True when the item waits on a VTech team (never shown to external recipients). */
+  ownerInternal?: boolean;
 }
 
 export interface ReportInput {
@@ -86,13 +88,12 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
     a.floorSort - b.floorSort || a.roomSort - b.roomSort || a.seq - b.seq || a.text.localeCompare(b.text));
 
   const withLevels = sorted.map((i) => ({ ...i, reminderNo: i.reminderCount + 1 }));
-  const maxReminder = withLevels.reduce((m, i) => Math.max(m, i.reminderNo), 1);
 
   const plural = withLevels.length === 1 ? '' : 's';
   const subject =
     `${internal ? '[Internal] ' : ''}${project.name}: ${withLevels.length} pending item${plural} ` +
     (category ? `– ${category} ` : `for ${agency.typeName} (${agency.companyName}) `) +
-    `– reminder #${maxReminder} – ${formatDate(visitDate)}`;
+    `– ${formatDate(visitDate)}`;
   const client = project.clientName ? ` (${project.clientName})` : '';
   const intro = category
     ? `As of ${formatDate(visitDate)}, the following items at ${project.name}${client} are still pending (${category}). `
@@ -124,7 +125,7 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
       intro + closingAsk,
       '',
       ...withLevels.map((i, n) =>
-        `${n + 1}. ${location(i)}: ${i.text}${ownerTag(i)} — first raised ${formatDate(i.firstRaisedOn)}, reminder #${i.reminderNo}` +
+        `${n + 1}. ${location(i)}: ${i.text}${ownerTag(i)} — pending since ${formatDate(i.firstRaisedOn)}, reminder #${i.reminderNo}` +
         (i.note ? ` (${i.note})` : '')),
       '',
       terms,
@@ -210,7 +211,7 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
     let body = '';
     let shown = 0;
     for (const [n, i] of withLevels.entries()) {
-      const line = `${n + 1}. ${location(i)}: ${i.text}${ownerTag(i)} (since ${formatDate(i.firstRaisedOn)}, #${i.reminderNo})\n`;
+      const line = `${n + 1}. ${location(i)}: ${i.text}${ownerTag(i)} (since ${formatDate(i.firstRaisedOn)}, reminder #${i.reminderNo})\n`;
       if (head.length + body.length + line.length + foot.length > WHATSAPP_MAX) break;
       body += line;
       shown++;
