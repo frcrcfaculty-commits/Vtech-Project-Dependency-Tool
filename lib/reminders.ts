@@ -53,7 +53,7 @@ export async function loadCategories(db: Db, projectId: string): Promise<Categor
   }));
 }
 
-export interface RoundInput { category: string; agencyTypeIds: string[]; channel: Channel; preview?: boolean }
+export interface RoundInput { category: string; agencyTypeIds: string[]; channel: Channel; preview?: boolean; itemIds?: string[] }
 
 /** Validates the request body; throws 400 with a plain message. */
 export function parseRoundInput(body: unknown): RoundInput {
@@ -62,7 +62,12 @@ export function parseRoundInput(body: unknown): RoundInput {
   if (!Array.isArray(b.agencyTypeIds) || !b.agencyTypeIds.length || !b.agencyTypeIds.every((x) => typeof x === 'string'))
     throw new HttpError(400, 'Tick at least one recipient group');
   if (b.channel !== 'email' && b.channel !== 'whatsapp') throw new HttpError(400, "channel must be 'email' or 'whatsapp'");
-  return { category: b.category, agencyTypeIds: [...new Set(b.agencyTypeIds as string[])], channel: b.channel, preview: b.preview === true };
+  if (b.itemIds !== undefined && (!Array.isArray(b.itemIds) || !b.itemIds.length || !b.itemIds.every((x) => typeof x === 'string')))
+    throw new HttpError(400, 'itemIds must be a non-empty list of item ids');
+  return {
+    category: b.category, agencyTypeIds: [...new Set(b.agencyTypeIds as string[])], channel: b.channel, preview: b.preview === true,
+    ...(b.itemIds ? { itemIds: [...new Set(b.itemIds as string[])] } : {}),
+  };
 }
 
 export interface PlannedMessage { agencyId: string; agency: string; typeName: string; report: BuiltReport }
@@ -130,7 +135,10 @@ export async function runRound(db: Db, me: Me, projectId: string, input: RoundIn
   if (bad.length) throw new HttpError(400, `Not a recipient group of "${cat.label}"`);
 
   const typeById = new Map((types ?? []).map((t) => [t.id as string, t as { id: string; name: string; internal: boolean }]));
-  const ownerOf = new Map((catItems ?? []).map((r) => [r.item_id as string, typeById.get(r.agency_type_id) ?? null]));
+  // Pending page: only the ticked items (still limited to the category's pending items).
+  const only = input.itemIds ? new Set(input.itemIds) : null;
+  const ownerOf = new Map((catItems ?? []).filter((r) => !only || only.has(r.item_id))
+    .map((r) => [r.item_id as string, typeById.get(r.agency_type_id) ?? null]));
   if (!ownerOf.size) throw new HttpError(400, `Nothing pending under "${cat.label}"`);
 
   const { data: rows, error: iErr } = await db.from('dependency_items')
