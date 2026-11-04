@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, use, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import { AppHeader } from '@/components/app-header';
 import Link from 'next/link';
@@ -31,6 +30,7 @@ interface ReminderCategory {
   label: string;
   itemCount: number;
   colour: string | null;
+  section: 'all' | 'vtech' | 'other';
   recipients: RecipientGroup[];
 }
 
@@ -71,13 +71,51 @@ const CATEGORY_CHIP_COLORS: Record<string, { bg: string; text: string; border: s
   all: { bg: 'bg-accent/10', text: 'text-accent', border: 'border-accent/30' },
 };
 
+function formatRecipientName(name: string, section: string): string {
+  const lower = name.toLowerCase();
+  if (section === 'vtech') {
+    if (lower.includes('sales')) return 'Sales';
+    if (lower.includes('installer')) return 'Installer';
+    if (lower.includes('programmer')) return 'Programmer';
+  }
+  if (lower.includes('pmc') || lower.includes('architect')) return 'PMC';
+  if (lower.includes('sales')) return 'VTECH Sales';
+  if (lower.includes('installer')) return 'VTECH Installer';
+  if (lower.includes('programmer')) return 'VTECH Programmer';
+  return name;
+}
+
+function EyeIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+    </svg>
+  );
+}
+
+function WhatsAppIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+      <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.007c.106.005.249-.04.39.299.144.347.491 1.2.534 1.287.043.087.072.188.014.303-.058.116-.087.188-.173.289l-.26.302c-.087.087-.179.182-.077.357.101.174.449.741.964 1.2.662.589 1.221.77 1.394.856.173.086.274.072.375-.043.101-.116.433-.506.549-.679.116-.173.231-.144.39-.086s1.011.477 1.184.563c.173.087.289.13.332.202.043.073.043.419-.101.824z" />
+    </svg>
+  );
+}
+
+function MailIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+    </svg>
+  );
+}
+
 export default function ProjectRemindersPage({
   params,
 }: {
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
-  const router = useRouter();
 
   const [projectName, setProjectName] = useState<string>('Project');
   const [categories, setCategories] = useState<ReminderCategory[]>([]);
@@ -93,6 +131,7 @@ export default function ProjectRemindersPage({
   const [previewTab, setPreviewTab] = useState<'email' | 'whatsapp'>('whatsapp');
   const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [showMobilePreview, setShowMobilePreview] = useState(false);
 
   // Sending state: { categoryKey: string, channel: 'email' | 'whatsapp' } | null
   const [sendingState, setSendingState] = useState<{ key: string; channel: 'email' | 'whatsapp' } | null>(null);
@@ -140,7 +179,10 @@ export default function ProjectRemindersPage({
         if (res.ok) {
           const json = await res.json();
           if (Array.isArray(json) && json.length > 0) {
-            loadedCats = json;
+            loadedCats = json.map((c: any) => ({
+              ...c,
+              section: c.section || (['installer', 'programmer', 'sales'].includes(c.key) ? 'vtech' : ['electrical', 'carpentry'].includes(c.key) ? 'other' : 'all'),
+            }));
           }
         }
       } catch {
@@ -163,7 +205,7 @@ export default function ProjectRemindersPage({
           sb.from('reminder_category_items').select('category_key, item_id').eq('project_id', projectId),
         ]);
 
-        interface DbCat { key: string; label: string; colour: string | null; sort: number }
+        interface DbCat { key: string; label: string; colour: string | null; sort: number; section?: 'all' | 'vtech' | 'other' }
         interface DbRec { category_key: string; agency_type_id: string; default_checked: boolean; sort: number }
         interface DbType { id: string; name: string }
         interface DbCatItem { category_key: string; item_id: string }
@@ -225,6 +267,7 @@ export default function ProjectRemindersPage({
             label: c.label,
             itemCount: itemCountMap.get(c.key) ?? 0,
             colour: c.colour,
+            section: c.section || (['installer', 'programmer', 'sales'].includes(c.key) ? 'vtech' : ['electrical', 'carpentry'].includes(c.key) ? 'other' : 'all'),
             recipients: recipientGroups,
           };
         });
@@ -237,7 +280,6 @@ export default function ProjectRemindersPage({
       loadedCats.forEach((c) => {
         const selected = new Set<string>();
         c.recipients.forEach((rg) => {
-          // Only check by default if project actually has this agency and defaultChecked is true
           if (rg.defaultChecked && rg.agencies.length > 0) {
             selected.add(rg.agencyTypeId);
           }
@@ -246,9 +288,8 @@ export default function ProjectRemindersPage({
       });
       setSelectedRecipients(initialSelected);
 
-      // Set initial focused category
       if (loadedCats.length > 0) {
-        setFocusedCategoryKey(loadedCats[0].key);
+        setFocusedCategoryKey((prev) => (loadedCats.some((c) => c.key === prev) ? prev : loadedCats[0].key));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load reminder categories');
@@ -306,10 +347,14 @@ export default function ProjectRemindersPage({
           setPreviewData(data);
         } else {
           const msg = await res.json().then((j: { error?: string }) => j.error).catch(() => null);
-          setPreviewData({ email: null, whatsapp: null, itemCount: focusedCategory.itemCount, warnings: [msg ?? `Preview failed (${res.status})`] });
+          setPreviewData({
+            email: null,
+            whatsapp: null,
+            itemCount: focusedCategory.itemCount,
+            warnings: [msg ?? `Preview failed (${res.status})`],
+          });
         }
       } catch {
-        // Fallback preview
         setPreviewData(null);
       } finally {
         setPreviewLoading(false);
@@ -360,7 +405,6 @@ export default function ProjectRemindersPage({
 
       showToast(`Reminder sent: ${cat.label} -> ${selectedNames.join(', ')}`);
 
-      // Collect links to open
       const allLinks: { label: string; url: string }[] = [];
       const waDispatchIds: string[] = [];
 
@@ -381,7 +425,6 @@ export default function ProjectRemindersPage({
         }
       });
 
-      // Try opening links in new windows
       let blockedPopup = false;
       allLinks.forEach((link) => {
         const w = window.open(link.url, '_blank');
@@ -390,7 +433,6 @@ export default function ProjectRemindersPage({
         }
       });
 
-      // If popup blocker blocked windows, display modal with direct clickable links
       if (blockedPopup && allLinks.length > 0) {
         setPopupLinksModal({
           title: `${cat.label} -- ${channel.toUpperCase()} Dispatches`,
@@ -398,7 +440,6 @@ export default function ProjectRemindersPage({
         });
       }
 
-      // If WhatsApp dispatches were created, show "I've sent it" confirmation dialog
       if (waDispatchIds.length > 0) {
         setConfirmDialog({
           dispatchIds: waDispatchIds,
@@ -406,7 +447,6 @@ export default function ProjectRemindersPage({
         });
       }
 
-      // Refresh category item counts
       await loadCategoriesData();
     } catch (err) {
       setError(err instanceof Error ? err.message : `Failed to send ${channel} reminders`);
@@ -433,6 +473,195 @@ export default function ProjectRemindersPage({
     }
   };
 
+  // 3 Boxes grouping
+  const sections = useMemo(() => {
+    const allCats = categories.filter((c) => c.section === 'all' || c.key === 'all');
+    const vtechCats = categories.filter((c) => c.section === 'vtech' || ['installer', 'programmer', 'sales'].includes(c.key));
+    const otherCats = categories.filter((c) => c.section === 'other' || ['electrical', 'carpentry'].includes(c.key));
+
+    return [
+      {
+        id: 'all',
+        title: 'All dependencies',
+        subtitle: 'Select recipients to follow up on all outstanding project dependencies',
+        categories: allCats,
+      },
+      {
+        id: 'vtech',
+        title: 'VTECH dependencies',
+        subtitle: 'Internal team follow-ups (Installer, Programmer, Sales)',
+        categories: vtechCats,
+      },
+      {
+        id: 'other',
+        title: 'Other agency',
+        subtitle: 'External trade contractor follow-ups (Electrician, Carpenter)',
+        categories: otherCats,
+      },
+    ];
+  }, [categories]);
+
+  // Preview content component
+  const renderPreviewContent = () => {
+    if (previewLoading) {
+      return (
+        <div className="flex justify-center py-12">
+          <svg className="h-6 w-6 animate-spin text-accent" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        </div>
+      );
+    }
+
+    if (!focusedCategory || focusedCategory.itemCount === 0) {
+      return (
+        <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-text-muted">
+          No pending items for {focusedCategory?.label ?? 'this category'}.
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-3">
+        {previewTab === 'email' ? (
+          <div className="space-y-2.5 text-xs">
+            <div className="rounded-lg bg-surface-alt p-2.5 border border-border space-y-1">
+              <div>
+                <span className="font-semibold text-text-secondary">To: </span>
+                <span className="text-text-primary">
+                  {previewData?.drafts?.some((d) => d.email)
+                    ? previewData.drafts.flatMap((d) => d.email?.to ?? []).map(personLabel).join(', ')
+                    : 'No recipient email'}
+                </span>
+              </div>
+              <div>
+                <span className="font-semibold text-text-secondary">Subject: </span>
+                <span className="text-text-primary font-mono text-[11px]">
+                  {previewData?.email?.subject || `Pending Dependencies -- ${projectName}`}
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border overflow-hidden bg-white">
+              {previewData?.email?.html ? (
+                <iframe
+                  title="Email Preview"
+                  srcDoc={previewData.email.html}
+                  sandbox="allow-same-origin"
+                  className="w-full h-72 border-0 text-text-primary"
+                />
+              ) : (
+                <pre className="p-3 text-[11px] font-sans whitespace-pre-wrap text-text-primary leading-relaxed h-72 overflow-y-auto">
+                  {previewData?.email?.text || 'No email draft available.'}
+                </pre>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2.5 text-xs">
+            <div className="rounded-lg bg-surface-alt p-2.5 border border-border">
+              <span className="font-semibold text-text-secondary">Recipients: </span>
+              <span className="text-text-primary">
+                {previewData?.drafts?.some((d) => d.whatsapp)
+                  ? previewData.drafts.flatMap((d) => d.whatsapp?.to ?? []).map(personLabel).join(', ')
+                  : 'No phone numbers on selected agencies'}
+              </span>
+            </div>
+
+            <div className="rounded-2xl bg-[#efeae2] p-3 border border-border">
+              <div className="rounded-xl bg-white p-3 shadow-2xs max-w-sm text-xs font-sans text-text-primary whitespace-pre-wrap leading-relaxed border border-border/40">
+                {previewData?.whatsapp?.text || 'No WhatsApp text draft.'}
+                <div className="mt-1 text-right text-[10px] text-text-muted">
+                  Just now
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Warnings under the preview */}
+        {previewData?.warnings && previewData.warnings.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 space-y-1">
+            <div className="flex items-center gap-1.5 font-bold text-amber-900">
+              <svg className="h-4 w-4 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span>Recipient Notice</span>
+            </div>
+            <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-amber-800">
+              {previewData.warnings.map((w, idx) => (
+                <li key={idx}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Render 32px Action Icon Buttons
+  const renderActionButtons = (
+    cat: ReminderCategory,
+    isFocused: boolean,
+    hasPending: boolean,
+    isSendingThisCat: boolean
+  ) => {
+    return (
+      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        {/* Preview Button (32px) */}
+        <button
+          type="button"
+          title={`Preview ${cat.label}`}
+          aria-label={`Preview ${cat.label}`}
+          onClick={() => {
+            setFocusedCategoryKey(cat.key);
+            setShowMobilePreview(true);
+          }}
+          className={`h-8 w-8 rounded-lg border flex items-center justify-center transition-colors ${
+            isFocused
+              ? 'border-accent bg-accent/15 text-accent shadow-xs'
+              : 'border-border bg-surface text-text-secondary hover:bg-surface-alt hover:text-text-primary'
+          }`}
+        >
+          <EyeIcon className="h-4 w-4" />
+        </button>
+
+        {/* WhatsApp Button (32px) */}
+        <button
+          type="button"
+          title={`Send WhatsApp reminder for ${cat.label}`}
+          aria-label={`Send WhatsApp reminder for ${cat.label}`}
+          disabled={!hasPending || isSendingThisCat}
+          onClick={() => handleSendReminder(cat, 'whatsapp')}
+          className="h-8 w-8 rounded-lg border border-border bg-surface flex items-center justify-center text-[#25D366] hover:bg-surface-alt transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs"
+        >
+          {isSendingThisCat && sendingState?.channel === 'whatsapp' ? (
+            <span className="h-3.5 w-3.5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <WhatsAppIcon className="h-4 w-4" />
+          )}
+        </button>
+
+        {/* Email Button (32px) */}
+        <button
+          type="button"
+          title={`Send Email reminder for ${cat.label}`}
+          aria-label={`Send Email reminder for ${cat.label}`}
+          disabled={!hasPending || isSendingThisCat}
+          onClick={() => handleSendReminder(cat, 'email')}
+          className="h-8 w-8 rounded-lg border border-border bg-surface flex items-center justify-center text-accent hover:bg-surface-alt transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs"
+        >
+          {isSendingThisCat && sendingState?.channel === 'email' ? (
+            <span className="h-3.5 w-3.5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <MailIcon className="h-4 w-4" />
+          )}
+        </button>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-dvh bg-surface-alt pb-16">
       <AppHeader />
@@ -455,7 +684,7 @@ export default function ProjectRemindersPage({
               <span className="text-xs font-semibold text-text-muted">Reminder Format</span>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
-              Reminders -- {projectName}
+              Reminders — {projectName}
             </h1>
             <p className="text-xs text-text-secondary mt-0.5">
               Send follow-up reminders per category to trade contractors and execution teams (HansalV2 matrix).
@@ -499,148 +728,142 @@ export default function ProjectRemindersPage({
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* ────────────────────── LEFT COLUMN: CATEGORIES TABLE ────────────────────── */}
-            <div className="lg:col-span-7 xl:col-span-8 space-y-4">
-              <div className="rounded-2xl border border-border bg-surface overflow-hidden shadow-2xs">
-                <div className="border-b border-border/70 px-4 py-3 bg-surface-alt/50 flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-                    Reminder Format Categories
-                  </span>
-                  <span className="text-xs text-text-muted">
-                    {categories.length} categories configured
-                  </span>
-                </div>
+            {/* ────────────────────── LEFT COLUMN: 3 BOXES ────────────────────── */}
+            <div className="lg:col-span-7 xl:col-span-8 space-y-5">
+              {sections.map((sec) => {
+                if (sec.categories.length === 0) return null;
+                const totalPending = sec.categories.reduce((acc, c) => acc + c.itemCount, 0);
 
-                <div className="divide-y divide-border">
-                  {categories.map((cat) => {
-                    const isFocused = focusedCategoryKey === cat.key;
-                    const chipStyle = CATEGORY_CHIP_COLORS[cat.key] ?? CATEGORY_CHIP_COLORS.all;
-                    const catSelectedRecipients = selectedRecipients[cat.key] ?? new Set();
-                    // Sendable only with pending items and at least one ticked group that exists in this project.
-                    const hasPending = cat.itemCount > 0 &&
-                      cat.recipients.some((r) => r.agencies.length > 0 && catSelectedRecipients.has(r.agencyTypeId));
-                    const isSendingThisCat = sendingState?.key === cat.key;
-
-                    return (
-                      <div
-                        key={cat.key}
-                        onClick={() => setFocusedCategoryKey(cat.key)}
-                        className={`p-4 sm:p-5 transition-colors cursor-pointer ${
-                          isFocused ? 'bg-accent/5 ring-1 ring-inset ring-accent/30' : 'hover:bg-surface-alt/40'
+                return (
+                  <div
+                    key={sec.id}
+                    className="rounded-xl border border-border bg-surface overflow-hidden shadow-2xs"
+                  >
+                    {/* Box Header */}
+                    <div className="border-b border-border/70 px-4 py-2.5 bg-surface-alt/60 flex items-center justify-between">
+                      <div>
+                        <h2 className="text-xs font-bold uppercase tracking-wider text-text-primary">
+                          {sec.title}
+                        </h2>
+                        <p className="text-[11px] text-text-muted mt-0.5">
+                          {sec.subtitle}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                          totalPending > 0
+                            ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                            : 'bg-surface-alt text-text-muted border border-border'
                         }`}
                       >
-                        {/* Top: Category Chip + Pending Count */}
-                        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`inline-flex items-center rounded-lg border px-2.5 py-1 text-xs font-bold ${chipStyle.bg} ${chipStyle.text} ${chipStyle.border}`}
-                            >
-                              {cat.label}
-                            </span>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                                hasPending
-                                  ? 'bg-warning-light text-warning border border-warning/20'
-                                  : 'bg-surface-alt text-text-muted border border-border'
-                              }`}
-                            >
-                              {cat.itemCount} pending
-                            </span>
-                          </div>
+                        {totalPending} pending
+                      </span>
+                    </div>
 
-                          {!hasPending && (
-                            <span className="text-xs font-medium text-text-muted italic">
-                              Nothing pending
-                            </span>
-                          )}
-                        </div>
+                    {/* Box Category Lines (~48px each, thin dividers) */}
+                    <div className="divide-y divide-border/60">
+                      {sec.categories.map((cat) => {
+                        const isFocused = focusedCategoryKey === cat.key;
+                        const chipStyle = CATEGORY_CHIP_COLORS[cat.key] ?? CATEGORY_CHIP_COLORS.all;
+                        const catSelectedRecipients = selectedRecipients[cat.key] ?? new Set();
+                        const hasPending =
+                          cat.itemCount > 0 &&
+                          cat.recipients.some(
+                            (r) => r.agencies.length > 0 && catSelectedRecipients.has(r.agencyTypeId)
+                          );
+                        const isSendingThisCat = sendingState?.key === cat.key;
 
-                        {/* Recipient Checkboxes */}
-                        <div className="mb-4">
-                          <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-2">
-                            Recipients offered:
-                          </p>
-                          <div className="flex flex-wrap gap-2.5">
-                            {cat.recipients.map((rg) => {
-                              const hasAgencies = rg.agencies.length > 0;
-                              const contactCount = rg.agencies.reduce(
-                                (acc, a) => acc + (a.contacts?.length ?? 0),
-                                0
-                              );
-                              const isChecked = catSelectedRecipients.has(rg.agencyTypeId);
-
-                              return (
-                                <label
-                                  key={rg.agencyTypeId}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className={`inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
-                                    !hasAgencies
-                                      ? 'opacity-40 cursor-not-allowed border-dashed border-border bg-surface-alt/30 text-text-muted'
-                                      : isChecked
-                                      ? 'border-accent bg-accent/10 text-accent font-semibold shadow-2xs'
-                                      : 'border-border bg-surface text-text-secondary hover:border-text-secondary'
-                                  }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    disabled={!hasAgencies}
-                                    checked={isChecked}
-                                    onChange={() => toggleRecipient(cat.key, rg.agencyTypeId)}
-                                    className="h-3.5 w-3.5 rounded border-border text-accent focus:ring-accent"
-                                  />
-                                  <span>
-                                    {rg.name}{' '}
-                                    <span className="text-[11px] text-text-muted">
-                                      ({hasAgencies ? contactCount : 'not added'})
-                                    </span>
+                        return (
+                          <div
+                            key={cat.key}
+                            onClick={() => setFocusedCategoryKey(cat.key)}
+                            className={`px-3.5 py-2.5 transition-colors cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 min-h-[48px] ${
+                              isFocused
+                                ? 'bg-accent/5 ring-1 ring-inset ring-accent/30'
+                                : 'hover:bg-surface-alt/40'
+                            }`}
+                          >
+                            {/* Left area: Label + Count + Checkboxes */}
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                              {/* Row 1 on mobile: Label + Count + Action Buttons */}
+                              <div className="flex items-center justify-between sm:justify-start gap-2">
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span
+                                    className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${chipStyle.bg} ${chipStyle.text} ${chipStyle.border}`}
+                                  >
+                                    {cat.label}
                                   </span>
-                                </label>
-                              );
-                            })}
+                                  <span
+                                    className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                                      cat.itemCount > 0
+                                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                        : 'bg-surface-alt text-text-muted border border-border'
+                                    }`}
+                                  >
+                                    {cat.itemCount} pending
+                                  </span>
+                                </div>
+
+                                {/* On phone: action buttons right next to the label */}
+                                <div className="flex sm:hidden items-center gap-1 shrink-0">
+                                  {renderActionButtons(cat, isFocused, hasPending, isSendingThisCat)}
+                                </div>
+                              </div>
+
+                              {/* Checkbox group */}
+                              <div
+                                className="flex flex-wrap items-center gap-x-3 gap-y-1.5"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {cat.recipients.map((rg) => {
+                                  const isChecked = catSelectedRecipients.has(rg.agencyTypeId);
+                                  const hasAgencies = rg.agencies.length > 0;
+                                  const displayName = formatRecipientName(rg.name, cat.section);
+                                  return (
+                                    <label
+                                      key={rg.agencyTypeId}
+                                      title={
+                                        !hasAgencies
+                                          ? `${rg.name} (not added to project)`
+                                          : rg.name
+                                      }
+                                      className={`inline-flex items-center gap-1.5 text-xs select-none transition-opacity ${
+                                        !hasAgencies
+                                          ? 'opacity-40 cursor-not-allowed text-text-muted'
+                                          : 'cursor-pointer text-text-secondary hover:text-text-primary'
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        disabled={!hasAgencies}
+                                        checked={isChecked}
+                                        onChange={() => toggleRecipient(cat.key, rg.agencyTypeId)}
+                                        className="h-3.5 w-3.5 rounded border-border text-accent focus:ring-accent disabled:cursor-not-allowed"
+                                      />
+                                      <span className={isChecked ? 'font-semibold text-text-primary' : ''}>
+                                        {displayName}
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* On desktop: action buttons at right */}
+                            <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+                              {renderActionButtons(cat, isFocused, hasPending, isSendingThisCat)}
+                            </div>
                           </div>
-                        </div>
-
-                        {/* Action Buttons: Send WhatsApp · Send Email */}
-                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/50">
-                          <span className="text-xs text-text-muted">
-                            {isFocused ? 'Previewing' : 'Click row to preview draft'}
-                          </span>
-
-                          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              disabled={!hasPending || isSendingThisCat}
-                              onClick={() => handleSendReminder(cat, 'whatsapp')}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              <svg className="h-3.5 w-3.5 text-success" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.007c.106.005.249-.04.39.299.144.347.491 1.2.534 1.287.043.087.072.188.014.303-.058.116-.087.188-.173.289l-.26.302c-.087.087-.179.182-.077.357.101.174.449.741.964 1.2.662.589 1.221.77 1.394.856.173.086.274.072.375-.043.101-.116.433-.506.549-.679.116-.173.231-.144.39-.086s1.011.477 1.184.563c.173.087.289.13.332.202.043.073.043.419-.101.824z" />
-                              </svg>
-                              {isSendingThisCat && sendingState?.channel === 'whatsapp' ? 'Sending…' : 'Send WhatsApp'}
-                            </button>
-
-                            <button
-                              type="button"
-                              disabled={!hasPending || isSendingThisCat}
-                              onClick={() => handleSendReminder(cat, 'email')}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                              </svg>
-                              {isSendingThisCat && sendingState?.channel === 'email' ? 'Sending…' : 'Send Email'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            {/* ────────────────────── RIGHT COLUMN: STICKY PREVIEW PANEL ────────────────────── */}
-            <div className="lg:col-span-5 xl:col-span-4 sticky top-6 space-y-4">
+            {/* ────────────────────── RIGHT COLUMN: STICKY PREVIEW (DESKTOP) ────────────────────── */}
+            <div className="hidden lg:block lg:col-span-5 xl:col-span-4 sticky top-6 space-y-4">
               <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm space-y-3">
                 <div className="flex items-center justify-between border-b border-border/70 pb-3">
                   <div>
@@ -652,7 +875,7 @@ export default function ProjectRemindersPage({
                     </p>
                   </div>
 
-                  {/* Channel Tabs: Email | WhatsApp */}
+                  {/* Channel Tabs: WhatsApp | Email */}
                   <div className="flex rounded-lg bg-surface-alt p-0.5 border border-border">
                     <button
                       type="button"
@@ -679,76 +902,85 @@ export default function ProjectRemindersPage({
                   </div>
                 </div>
 
-                {previewLoading ? (
-                  <div className="flex justify-center py-12">
-                    <svg className="h-6 w-6 animate-spin text-accent" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                  </div>
-                ) : !focusedCategory || focusedCategory.itemCount === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-text-muted">
-                    No pending items for this category.
-                  </div>
-                ) : previewTab === 'email' ? (
-                  /* ── EMAIL PREVIEW ── */
-                  <div className="space-y-2.5 text-xs">
-                    <div className="rounded-lg bg-surface-alt p-2.5 border border-border space-y-1">
-                      <div>
-                        <span className="font-semibold text-text-secondary">To: </span>
-                        <span className="text-text-primary">
-                          {previewData?.drafts?.some((d) => d.email) ? previewData.drafts.flatMap((d) => d.email?.to ?? []).map(personLabel).join(', ') : previewData?.warnings?.join(' ') || 'No recipient email'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="font-semibold text-text-secondary">Subject: </span>
-                        <span className="text-text-primary font-mono text-[11px]">
-                          {previewData?.email?.subject || `Pending Dependencies -- ${projectName}`}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-border overflow-hidden bg-white">
-                      {previewData?.email?.html ? (
-                        <iframe
-                          title="Email Preview"
-                          srcDoc={previewData.email.html}
-                          sandbox="allow-same-origin"
-                          className="w-full h-72 border-0 text-text-primary"
-                        />
-                      ) : (
-                        <pre className="p-3 text-[11px] font-sans whitespace-pre-wrap text-text-primary leading-relaxed h-72 overflow-y-auto">
-                          {previewData?.email?.text || 'No email draft available.'}
-                        </pre>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  /* ── WHATSAPP PREVIEW ── */
-                  <div className="space-y-2.5 text-xs">
-                    <div className="rounded-lg bg-surface-alt p-2.5 border border-border">
-                      <span className="font-semibold text-text-secondary">Recipients: </span>
-                      <span className="text-text-primary">
-                        {previewData?.drafts?.some((d) => d.whatsapp)
-                          ? previewData.drafts.flatMap((d) => d.whatsapp?.to ?? []).map(personLabel).join(', ')
-                          : previewData?.warnings?.join(' ') || 'No phone numbers on selected agencies'}
-                      </span>
-                    </div>
-
-                    <div className="rounded-2xl bg-[#efeae2] p-3 border border-border">
-                      <div className="rounded-xl bg-white p-3 shadow-2xs max-w-sm text-xs font-sans text-text-primary whitespace-pre-wrap leading-relaxed border border-border/40">
-                        {previewData?.whatsapp?.text || 'No WhatsApp text draft.'}
-                        <div className="mt-1 text-right text-[10px] text-text-muted">
-                          Just now
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                {renderPreviewContent()}
               </div>
             </div>
           </div>
         )}
+
+        {/* ── Mobile Bottom Sheet for Preview ── */}
+        {showMobilePreview && (
+          <div className="fixed inset-0 z-50 lg:hidden">
+            <div
+              className="fixed inset-0 bg-black/50 transition-opacity"
+              onClick={() => setShowMobilePreview(false)}
+            />
+            <div className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] rounded-t-2xl border-t border-border bg-surface p-4 shadow-2xl overflow-y-auto flex flex-col">
+              <div className="flex items-center justify-between pb-3 border-b border-border">
+                <div>
+                  <h3 className="text-sm font-bold text-text-primary">
+                    Draft Preview — {focusedCategory?.label}
+                  </h3>
+                  <p className="text-[11px] text-text-muted">
+                    {previewTab === 'whatsapp' ? 'WhatsApp draft' : 'Email draft'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex rounded-lg bg-surface-alt p-0.5 border border-border">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTab('whatsapp')}
+                      className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
+                        previewTab === 'whatsapp'
+                          ? 'bg-surface text-text-primary shadow-2xs'
+                          : 'text-text-muted hover:text-text-primary'
+                      }`}
+                    >
+                      WA
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTab('email')}
+                      className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
+                        previewTab === 'email'
+                          ? 'bg-surface text-text-primary shadow-2xs'
+                          : 'text-text-muted hover:text-text-primary'
+                      }`}
+                    >
+                      Email
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowMobilePreview(false)}
+                    aria-label="Close preview"
+                    className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-3 flex-1 overflow-y-auto space-y-3">
+                {renderPreviewContent()}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Floating Mobile Preview Pill */}
+        <div className="fixed bottom-4 right-4 z-40 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setShowMobilePreview(true)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2.5 text-xs font-bold text-white shadow-lg hover:bg-accent-hover transition-transform active:scale-95"
+          >
+            <EyeIcon className="h-4 w-4" />
+            <span>Preview ({focusedCategory?.label ?? 'Draft'})</span>
+          </button>
+        </div>
 
         {/* ── Confirmation Modal for WhatsApp Dispatches ("I've sent it") ── */}
         {confirmDialog && (
