@@ -1134,12 +1134,9 @@ export default function PendingPage() {
                       )}
                       <div>
                         <div className="flex items-center gap-2">
-                          <Link
-                            href={`/hub?p=${pGroup.project.id}`}
-                            className="text-sm font-bold text-text-primary hover:text-accent transition-colors"
-                          >
+                          <span className="text-sm font-extrabold text-text-primary">
                             {pGroup.project.name}
-                          </Link>
+                          </span>
                           {pGroup.project.client_name && (
                             <span className="text-xs text-text-secondary">({pGroup.project.client_name})</span>
                           )}
@@ -1148,15 +1145,6 @@ export default function PendingPage() {
                           {pGroup.totalItems} pending {pGroup.totalItems === 1 ? 'item' : 'items'}
                         </span>
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/hub?p=${pGroup.project.id}`}
-                        className="rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-text-secondary hover:text-text-primary"
-                      >
-                        Open in Hub →
-                      </Link>
                     </div>
                   </div>
 

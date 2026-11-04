@@ -683,7 +683,7 @@ export default function ProjectRemindersPage({
               <span className="text-text-muted text-xs">/</span>
               <span className="text-xs font-semibold text-text-muted">Reminder Format</span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
+            <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-text-primary">
               Reminders — {projectName}
             </h1>
             <p className="text-xs text-text-secondary mt-0.5">

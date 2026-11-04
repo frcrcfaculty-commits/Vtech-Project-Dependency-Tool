@@ -348,7 +348,7 @@ export default function ProjectHomePage({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold tracking-tight text-text-primary">
+                <h1 className="text-xl font-extrabold tracking-tight text-text-primary">
                   {project?.name}
                 </h1>
               </div>
@@ -370,12 +370,6 @@ export default function ProjectHomePage({
                   Export change log CSV
                 </button>
               )}
-              <Link
-                href={`/hub?p=${projectId}`}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2.5 text-xs font-semibold text-white shadow-sm"
-              >
-                Open in Dashboard →
-              </Link>
             </div>
           </div>
         </div>

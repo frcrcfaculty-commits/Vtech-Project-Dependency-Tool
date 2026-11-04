@@ -43,7 +43,6 @@ export function StepDialog({
   const [otherReason, setOtherReason] = useState('');
   const [date, setDate] = useState(todayIST());
   const [note, setNote] = useState(row.note ?? '');
-  const [agencyId, setAgencyId] = useState(row.agency_id ?? '');
   const [photo, setPhoto] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   useEscape(onClose, saving);
@@ -73,7 +72,6 @@ export function StepDialog({
     }
   }, [options, row.stuck_reason]);
 
-  const agencyChoices = agencies.filter((a) => (row.responsibility === 'internal' ? a.internal : !a.internal) || a.id === row.agency_id);
   const colour = stepColour(row.sheet_colour);
   const finalReason = reason === '__other' || options.length === 0 ? otherReason.trim() : reason;
 
@@ -92,10 +90,6 @@ export function StepDialog({
         photoPath = `${row.project_id}/${row.item_id}/${Date.now()}.webp`;
         const up = await sb.storage.from('evidence').upload(photoPath, blob, { contentType: 'image/webp' });
         if (up.error) throw up.error;
-      }
-      if (agencyId && agencyId !== row.agency_id) {
-        const { error: aErr } = await sb.from('dependency_items').update({ agency_id: agencyId }).eq('id', row.item_id);
-        if (aErr) throw aErr;
       }
       const { error: sErr } = await sb.rpc('set_item_status', {
         p_item: row.item_id,
@@ -195,19 +189,10 @@ export function StepDialog({
           </fieldset>
         )}
 
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="mt-4">
           <label className="block text-xs font-semibold uppercase tracking-wider text-text-secondary">
             {mode === 'done' ? 'Done on' : 'Noticed on'}
             <input type="date" value={date} max={todayIST()} onChange={(e) => setDate(e.target.value)} className="mt-1 block w-full rounded-lg border border-border px-3 py-2 text-sm font-normal normal-case tracking-normal" />
-          </label>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-text-secondary">
-            Waiting on
-            <select value={agencyId} onChange={(e) => setAgencyId(e.target.value)} className="mt-1 block w-full rounded-lg border border-border px-3 py-2 text-sm font-normal normal-case tracking-normal">
-              <option value="">Not assigned</option>
-              {agencyChoices.map((a) => (
-                <option key={a.id} value={a.id}>{a.label}</option>
-              ))}
-            </select>
           </label>
         </div>
         <label className="mt-3 block text-xs font-semibold uppercase tracking-wider text-text-secondary">
