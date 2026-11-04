@@ -236,9 +236,42 @@ function Dashboard() {
     return [f?.label, r?.name].filter(Boolean).join(' · ');
   };
   const titleOf = (l: Line) => l.product_catalogue?.title ?? l.boq_title ?? 'Product';
-  const agencyName = (id: string | null) => {
-    const a = id ? agencyById.get(id) : undefined;
-    return a ? a.company_name : null;
+
+  const formatAgency = (
+    agency?: { company_name: string; agency_types?: { name?: string | null; internal?: boolean | null } | null } | null,
+    defaultTypeName?: string | null,
+    sheetColour?: string | null
+  ): string => {
+    const typeName = agency?.agency_types?.name || defaultTypeName || '';
+    const compName = agency?.company_name || '';
+    const isInternal = agency?.agency_types?.internal === true ||
+      compName.toLowerCase().includes('vtech') ||
+      typeName.toLowerCase().includes('vtech');
+
+    const sc = (sheetColour ?? '').toUpperCase();
+    if (isInternal || sc === 'E06666' || sc === 'F4CCCC' || sc === 'FF00FF' || sc === 'F9CB9C') {
+      const tLower = typeName.toLowerCase();
+      if (tLower.includes('install') || sc === 'E06666') {
+        return 'Installer – VTech';
+      }
+      if (tLower.includes('program') || sc === 'F4CCCC') {
+        return 'Programmer – VTech';
+      }
+      if (tLower.includes('sale') || tLower.includes('project manager') || sc === 'FF00FF' || sc === 'F9CB9C') {
+        return 'Sales – VTech';
+      }
+      return 'Installer – VTech';
+    }
+
+    if (agency) {
+      const t = agency.agency_types?.name?.trim() || defaultTypeName?.trim() || 'Agency';
+      return `${t} – ${agency.company_name.trim()}`;
+    }
+
+    if (defaultTypeName) {
+      return `${defaultTypeName} – Unassigned`;
+    }
+    return 'General – Unassigned';
   };
 
   // ── matrix rows ──
@@ -249,7 +282,18 @@ function Dashboard() {
         const g = gateByLine.get(l.id) ?? [];
         const st = lineStatus(g);
         const shownSteps = showAllSteps ? [...g].sort((a, b) => a.seq - b.seq) : st.visible;
-        const involved = [...new Set(st.visible.filter((x) => !isDone(x.status)).map((x) => agencyName(x.agency_id)).filter(Boolean))] as string[];
+        const involved = [
+          ...new Set(
+            st.visible
+              .filter((x) => !isDone(x.status))
+              .map((x) => {
+                const a = x.agency_id ? agencyById.get(x.agency_id) : undefined;
+                const defType = x.step_id ? stepAgencyTypes.get(x.step_id) : undefined;
+                return formatAgency(a, defType, x.sheet_colour);
+              })
+              .filter(Boolean)
+          ),
+        ] as string[];
         return { line: l, gate: g, st, shownSteps, involved };
       })
       .filter(({ line, gate: g, st, involved }) => {
@@ -262,7 +306,7 @@ function Dashboard() {
         return true;
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, gateByLine, showAllSteps, search, agencyFilter, statusFilter, roomById, floorById, agencyById]);
+  }, [lines, gateByLine, showAllSteps, search, agencyFilter, statusFilter, roomById, floorById, agencyById, stepAgencyTypes]);
 
   const groups = useMemo(() => {
     const m = new Map<string, { key: string; label: string; sub?: string; order: (number | string)[]; rows: typeof rows }>();
@@ -279,31 +323,19 @@ function Dashboard() {
         gr.rows.push(r);
         m.set(key, gr);
       } else if (sortBy === 'agency') {
-        // Agency-wise key = the item's agency (agency_id), label = agency company name + type,
-        // fallback group "Unassigned — <default agency type>".
+        // Agency-wise key = label (<Type> – <Company> or <Type> – VTech),
+        // type first, VTech teams without duplicate name.
         const waitingSteps = r.st.visible.filter((x) => !isDone(x.status));
         const activeSteps = waitingSteps.length > 0 ? waitingSteps : r.gate.filter((x) => !isDone(x.status));
-        const targetSteps = activeSteps.length > 0 ? activeSteps : (r.gate.length > 0 ? [r.gate[0]] : [{ agency_id: null, step_id: null }]);
-
+        const targetSteps = activeSteps.length > 0 ? activeSteps : (r.gate.length > 0 ? [r.gate[0]] : [{ agency_id: null, step_id: null, sheet_colour: null }]);
         const seenKeys = new Set<string>();
         for (const step of targetSteps) {
-          let key: string;
-          let label: string;
-          let order: (number | string)[];
-
           const agency = step.agency_id ? agencyById.get(step.agency_id) : undefined;
-          if (agency) {
-            key = agency.id;
-            const typeName = agency.agency_types?.name;
-            label = typeName ? `${agency.company_name} · ${typeName}` : agency.company_name;
-            order = [agency.agency_types?.internal ? 1 : 0, label];
-          } else {
-            const defaultType = step.step_id ? stepAgencyTypes.get(step.step_id) : undefined;
-            const typeLabel = defaultType || 'General';
-            key = `unassigned-${typeLabel.toLowerCase()}`;
-            label = `Unassigned — ${typeLabel}`;
-            order = [2, label];
-          }
+          const defaultType = step.step_id ? stepAgencyTypes.get(step.step_id) : undefined;
+          const label = formatAgency(agency, defaultType, 'sheet_colour' in step ? step.sheet_colour : null);
+          const key = label;
+          const isVTech = label.endsWith('– VTech');
+          const order = [isVTech ? 1 : 0, label];
 
           if (!seenKeys.has(key)) {
             seenKeys.add(key);
@@ -352,15 +384,48 @@ function Dashboard() {
   }, [rows, sortBy, roomById, floorById, agencyById, stepAgencyTypes]);
 
   const totals = useMemo(() => {
-    const open = gate.filter((g) => !isDone(g.status) && !g.locked);
+    // 1. Products (line items): total · done · not done
+    const totalLines = lines.length;
+    let doneLines = 0;
+    for (const l of lines) {
+      const g = gateByLine.get(l.id) ?? [];
+      if (lineStatus(g).allDone) {
+        doneLines++;
+      }
+    }
+    const notDoneLines = totalLines - doneLines;
+
+    // 2. Other agency: pending items waiting on external agencies + client (red number)
+    const otherAgencyPending = gate.filter(
+      (g) => (g.responsibility === 'external' || g.responsibility === 'client') && g.status === 'pending'
+    ).length;
+
+    // 3. VTech Installer: total · done · pending of installer steps (sheet colour E06666)
+    const installerSteps = gate.filter((g) => (g.sheet_colour ?? '').toUpperCase() === 'E06666');
+    const installerTotal = installerSteps.length;
+    const installerDone = installerSteps.filter((g) => isDone(g.status)).length;
+    const installerPending = installerSteps.filter((g) => g.status === 'pending').length;
+
+    // 4. VTech Programmer: total · done · pending of programmer steps (sheet colour F4CCCC)
+    const programmerSteps = gate.filter((g) => (g.sheet_colour ?? '').toUpperCase() === 'F4CCCC');
+    const programmerTotal = programmerSteps.length;
+    const programmerDone = programmerSteps.filter((g) => isDone(g.status)).length;
+    const programmerPending = programmerSteps.filter((g) => g.status === 'pending').length;
+
+    const chaseable = gate.filter(
+      (g) => !isDone(g.status) && !g.locked && g.status === 'pending' && !g.waits_on_client
+    ).length;
+    const needsSteps = lines.filter((l) => !l.product_id && !(gateByLine.get(l.id)?.length)).length;
+
     return {
-      lines: lines.length,
-      done: lines.filter((l) => lineStatus(gateByLine.get(l.id) ?? []).allDone).length,
-      stuck: open.filter((g) => g.status === 'pending').length,
-      chaseable: open.filter((g) => g.status === 'pending' && !g.waits_on_client).length,
-      needsSteps: lines.filter((l) => !l.product_id && !(gateByLine.get(l.id)?.length)).length,
+      products: { total: totalLines, done: doneLines, notDone: notDoneLines },
+      otherAgencyPending,
+      installer: { total: installerTotal, done: installerDone, pending: installerPending },
+      programmer: { total: programmerTotal, done: programmerDone, pending: programmerPending },
+      chaseable,
+      needsSteps,
     };
-  }, [gate, lines, gateByLine]);
+  }, [lines, gate, gateByLine]);
 
   // ── actions ──
   function sendReminders() {
@@ -495,10 +560,8 @@ function Dashboard() {
                   {busy === 'remind' ? 'Preparing…' : `Send reminders${totals.chaseable ? ` (${totals.chaseable})` : ''}`}
                 </ActionButton>
                 <ActionButton icon="edit" onClick={() => setEditing(true)}>Edit project details</ActionButton>
-                {selected.status === 'closed' || selected.status === 'finished' ? (
+                {(selected.status === 'closed' || selected.status === 'finished') && (
                   <ActionButton icon="reopen" onClick={() => setProjectStatus('active')} disabled={busy === 'status'}>Reopen</ActionButton>
-                ) : (
-                  <ActionButton icon="archive" onClick={() => setProjectStatus('closed')} disabled={busy === 'status'} danger>Close project</ActionButton>
                 )}
                 <DeleteProjectButton
                   key={selected.id}
@@ -515,12 +578,48 @@ function Dashboard() {
               </div>
             </div>
 
-            {/* progress + triggers */}
+            {/* 4 stat cards */}
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <Stat label="Lines done" value={`${totals.done}/${totals.lines}`} />
-              <Stat label="Not done (stuck)" value={String(totals.stuck)} tone={totals.stuck ? 'danger' : undefined} />
-              <Stat label="In installation" value={`${progress.installation}%`} hint="iPhone programming starts at 50%" />
-              <Stat label="Programming done" value={`${progress.programming}%`} hint="Client side starts at 80%" />
+              <Stat
+                label="Products (line items)"
+                value={
+                  <>
+                    <span className="text-text-primary">{totals.products.total}</span>
+                    <span className="text-text-muted"> · </span>
+                    <span className="text-success">{totals.products.done}</span>
+                    <span className="text-text-muted"> · </span>
+                    <span className="text-danger">{totals.products.notDone}</span>
+                  </>
+                }
+              />
+              <Stat
+                label="Other agency"
+                value={<span className="text-danger">{totals.otherAgencyPending}</span>}
+              />
+              <Stat
+                label="VTech Installer"
+                value={
+                  <>
+                    <span className="text-text-primary">{totals.installer.total}</span>
+                    <span className="text-text-muted"> · </span>
+                    <span className="text-success">{totals.installer.done}</span>
+                    <span className="text-text-muted"> · </span>
+                    <span className="text-danger">{totals.installer.pending}</span>
+                  </>
+                }
+              />
+              <Stat
+                label="VTech Programmer"
+                value={
+                  <>
+                    <span className="text-text-primary">{totals.programmer.total}</span>
+                    <span className="text-text-muted"> · </span>
+                    <span className="text-success">{totals.programmer.done}</span>
+                    <span className="text-text-muted"> · </span>
+                    <span className="text-danger">{totals.programmer.pending}</span>
+                  </>
+                }
+              />
             </div>
             {totals.needsSteps > 0 && (
               <div className="mt-3 rounded-xl border border-warning/30 bg-warning-light px-4 py-2.5 text-sm text-warning">
@@ -606,9 +705,13 @@ function Dashboard() {
                               </p>
                             )}
                           </div>
-                          <div className="text-sm">
-                            <span className="md:hidden text-xs text-text-muted">Location: </span>{line.location ?? '—'}
-                            {sortBy !== 'room' && <span className="block text-xs text-text-muted">{where(line.room_id)}</span>}
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-text-primary truncate">
+                              {roomById.get(line.room_id)?.name ?? '—'}
+                            </p>
+                            <p className="text-xs text-text-muted truncate">
+                              {line.location || '—'}
+                            </p>
                           </div>
                           <div className="text-sm tabular-nums md:text-right"><span className="md:hidden text-xs text-text-muted">Qty: </span>{line.quantity}</div>
                           <div className="min-w-0">
@@ -665,7 +768,7 @@ function Dashboard() {
   );
 }
 
-/** Segmented colour bar: one segment per step, coloured by sheet_colour; filled = done/N.A., outlined = open, faded = locked; the current stuck step has a 2px dark outline. */
+/** Segmented colour bar: one segment per step, coloured by sheet_colour; filled = done/N.A., outlined = open, faded = locked; the current stuck step has a 2px dark outline. Each segment shows a tiny ✓ or ✗ for done or pending/stuck. */
 function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: GateRow) => void }) {
   const ordered = [...steps].sort((a, b) => a.seq - b.seq);
   if (ordered.length === 0) return null;
@@ -682,6 +785,7 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
           const isStuck = r.status === 'pending';
 
           const tip = `${r.label}${done ? ' (done)' : isStuck ? ` (stuck: ${r.stuck_reason || 'not done'})` : locked ? ' (locked)' : ' (open)'}`;
+          const markColor = c.text === '#FFFFFF' ? '#ffffff' : '#0f172a';
 
           return (
             <button
@@ -693,7 +797,7 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
               }}
               title={tip}
               aria-label={tip}
-              className={`h-4 min-w-[12px] flex-1 rounded-xs transition hover:scale-y-110 active:scale-95 ${
+              className={`h-4 min-w-[14px] flex-1 rounded-xs transition hover:scale-y-110 active:scale-95 flex items-center justify-center overflow-hidden ${
                 locked ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'
               }`}
               style={{
@@ -703,7 +807,39 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
                 borderStyle: 'solid',
                 boxShadow: isStuck ? '0 0 0 1px #0f172a' : undefined,
               }}
-            />
+            >
+              {done ? (
+                <svg
+                  viewBox="0 0 24 24"
+                  width="10"
+                  height="10"
+                  className="h-2.5 w-2.5 shrink-0"
+                  fill="none"
+                  stroke={markColor}
+                  strokeWidth={2.75}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              ) : isStuck ? (
+                <svg
+                  viewBox="0 0 24 24"
+                  width="10"
+                  height="10"
+                  className="h-2.5 w-2.5 shrink-0"
+                  fill="none"
+                  stroke={markColor}
+                  strokeWidth={2.75}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              ) : null}
+            </button>
           );
         })}
       </div>
@@ -731,7 +867,7 @@ function ActionButton({ icon, children, onClick, disabled, primary, danger }: {
   );
 }
 
-function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'danger' }) {
+function Stat({ label, value, hint, tone }: { label: string; value: React.ReactNode; hint?: string; tone?: 'danger' }) {
   return (
     <div className="rounded-xl border border-border bg-surface-alt/60 px-3 py-2">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">{label}</p>
