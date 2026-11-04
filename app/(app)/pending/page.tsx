@@ -100,16 +100,13 @@ export function formatPendingItemTitle(item: PendingItem): string {
 }
 
 export function formatAgencyLabel(item: PendingItem): string {
-  const typeName = item.project_dependencies?.agency_types?.name ?? item.agencies?.agency_types?.name;
+  // The assigned agency's type wins; the step's default type is only the fallback for unassigned items.
+  const typeName = item.agencies?.agency_types?.name ?? item.project_dependencies?.agency_types?.name;
   const comp = item.agencies?.company_name;
-
-  if (typeName === 'Installer' || typeName === 'Programmer' || typeName === 'Sales') {
-    return `${typeName} – VTech`;
-  }
-  if (comp && typeName && !comp.toLowerCase().includes(typeName.toLowerCase())) {
-    return `${typeName} – ${comp}`;
-  }
-  return comp ?? typeName ?? 'Unassigned';
+  const vtech: Record<string, string> = { 'VTech Installers': 'Installer', 'VTech Programmers': 'Programmer', 'VTECH Sales Team': 'Sales' };
+  if (typeName && vtech[typeName]) return `${vtech[typeName]} – VTech`;
+  if (!comp) return typeName ? `${typeName} – unassigned` : 'Unassigned';
+  return typeName && !comp.toLowerCase().includes(typeName.toLowerCase()) ? `${typeName} – ${comp}` : comp;
 }
 
 interface AgencyContact {
@@ -1641,9 +1638,6 @@ export default function PendingPage() {
                         <td className="p-3 align-top pt-3.5 whitespace-nowrap">
                           <div className="text-xs text-text-primary font-medium">
                             {formatPendingDate(item.first_raised_on)}
-                          </div>
-                          <div className={`text-[11px] ${daysOpen >= 14 ? 'text-danger font-bold' : 'text-text-muted'}`}>
-                            {daysOpen}d open ({item.reminder_count} rem)
                           </div>
                         </td>
 
