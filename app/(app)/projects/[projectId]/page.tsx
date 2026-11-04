@@ -7,6 +7,8 @@ import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
 import { DeleteProjectButton } from '@/components/delete-project-button';
 import { ProjectAgenciesForm } from '@/components/v5/project-agencies-form';
+import { BoqHistoryTab } from '@/components/v7/boq-history-tab';
+import { downloadCsv } from '@/lib/client/csv';
 import Link from 'next/link';
 
 interface Project {
@@ -98,12 +100,12 @@ export default function ProjectHomePage({
   const { profile } = useAuth();
 
   const tabParam = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState<'overview' | 'agencies' | 'settings'>(
-    tabParam === 'agencies' ? 'agencies' : tabParam === 'settings' ? 'settings' : 'overview'
+  const [activeTab, setActiveTab] = useState<'overview' | 'agencies' | 'boq_history' | 'settings'>(
+    tabParam === 'agencies' ? 'agencies' : tabParam === 'boq_history' ? 'boq_history' : tabParam === 'settings' ? 'settings' : 'overview'
   );
 
   useEffect(() => {
-    if (tabParam === 'agencies' || tabParam === 'settings' || tabParam === 'overview') {
+    if (tabParam === 'agencies' || tabParam === 'boq_history' || tabParam === 'settings' || tabParam === 'overview') {
       setActiveTab(tabParam);
     }
   }, [tabParam]);
@@ -266,6 +268,66 @@ export default function ProjectHomePage({
     pendingByFloor.set(label, (pendingByFloor.get(label) ?? 0) + 1);
   });
 
+  const exportChangeLogCsv = async () => {
+    try {
+      const sb = supabaseBrowser();
+      const { data, error: err } = await sb
+        .from('project_changes')
+        .select('id, requested_by, requested_at, reason, reference_type, reference, kind, changes, created_at, profiles(full_name)')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false });
+
+      if (err) throw err;
+      const headers = [
+        'Date & Time',
+        'Requested By',
+        'Requested At',
+        'Reason',
+        'Reference Type',
+        'Reference',
+        'Kind',
+        'Changed By',
+        'Changes Details',
+      ];
+      const rows = (data ?? []).map((c: any) => {
+        const dt = new Date(c.created_at).toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        });
+        const reqAt = c.requested_at
+          ? new Date(c.requested_at).toLocaleString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+              dateStyle: 'medium',
+              timeStyle: 'short',
+            })
+          : '—';
+        let changesStr = '';
+        if (Array.isArray(c.changes)) {
+          changesStr = c.changes.map((x: any) => `${x.what}: ${x.from} -> ${x.to}`).join('; ');
+        } else if (typeof c.changes === 'object' && c.changes) {
+          changesStr = JSON.stringify(c.changes);
+        }
+        return [
+          dt,
+          c.requested_by,
+          reqAt,
+          c.reason,
+          c.reference_type || '—',
+          c.reference || '—',
+          c.kind || 'project',
+          c.profiles?.full_name || '—',
+          changesStr,
+        ];
+      });
+      const safeName = (project?.name || 'project').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const dateStr = new Date().toISOString().slice(0, 10);
+      downloadCsv(`${safeName}_Change_Log_${dateStr}`, headers, rows);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to export change log');
+    }
+  };
+
   return (
     <div className="min-h-dvh bg-surface-alt pb-16">
       <AppHeader />
@@ -298,12 +360,23 @@ export default function ProjectHomePage({
               )}
             </div>
 
-            <Link
-              href={`/hub?p=${projectId}`}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2.5 text-xs font-semibold text-white shadow-sm"
-            >
-              Open in Dashboard →
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              {profile?.role === 'super_admin' && (
+                <button
+                  type="button"
+                  onClick={exportChangeLogCsv}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors shadow-xs"
+                >
+                  Export change log CSV
+                </button>
+              )}
+              <Link
+                href={`/hub?p=${projectId}`}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2.5 text-xs font-semibold text-white shadow-sm"
+              >
+                Open in Dashboard →
+              </Link>
+            </div>
           </div>
         </div>
 
@@ -312,6 +385,7 @@ export default function ProjectHomePage({
           {[
             { id: 'overview', label: 'Overview' },
             { id: 'agencies', label: 'Agencies' },
+            { id: 'boq_history', label: 'BOQ history' },
             { id: 'settings', label: 'Settings & Setup' },
           ].map((tab) => (
             <button
@@ -450,6 +524,16 @@ export default function ProjectHomePage({
               onSaved={() => loadData()}
             />
           </div>
+        )}
+
+        {/* ───────────────────────── TAB 3: BOQ HISTORY ───────────────────────── */}
+        {activeTab === 'boq_history' && (
+          <BoqHistoryTab
+            projectId={projectId}
+            projectName={project?.name ?? 'Project'}
+            rooms={rooms}
+            isSuperAdmin={profile?.role === 'super_admin'}
+          />
         )}
 
         {/* ───────────────────────── TAB 4: SETTINGS ───────────────────────── */}

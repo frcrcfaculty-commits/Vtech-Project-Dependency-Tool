@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { AppHeader } from '@/components/app-header';
+import { supabaseBrowser } from '@/lib/client/supabase';
+import { downloadCsv } from '@/lib/client/csv';
 import Link from 'next/link';
 
 interface DashboardProject {
@@ -90,6 +92,85 @@ export default function PortfolioDashboardPage() {
   const totalPending = sections.reduce((sum, s) => sum + s.pending, 0);
   const totalClosedWeek = sections.reduce((sum, s) => sum + s.closedThisWeek, 0);
 
+  const [exportingBoq, setExportingBoq] = useState(false);
+
+  const exportAllBoqChanges = async () => {
+    try {
+      setExportingBoq(true);
+      const sb = supabaseBrowser();
+      const { data: events, error: err } = await sb
+        .from('boq_events')
+        .select('*, projects(name), project_changes(requested_by, requested_at, reason, reference_type, reference)')
+        .order('at', { ascending: false });
+
+      if (err) throw err;
+
+      const formatChangeDetails = (details: any) => {
+        if (!details || typeof details !== 'object' || Object.keys(details).length === 0) return '—';
+        return Object.entries(details)
+          .map(([k, v]: [string, any]) => {
+            const fromStr = v?.from === null || v?.from === undefined || v?.from === '' ? 'none' : String(v.from);
+            const toStr = v?.to === null || v?.to === undefined || v?.to === '' ? 'none' : String(v.to);
+            return `${k}: ${fromStr} → ${toStr}`;
+          })
+          .join('; ');
+      };
+
+      const headers = [
+        'Project',
+        'Date & Time',
+        'Event',
+        'Product',
+        'Floor',
+        'Room',
+        'Location',
+        'Quantity',
+        'Change Details',
+        'Requested By',
+        'Reason',
+        'Reference Type',
+        'Reference',
+      ];
+
+      const rows = (events ?? []).map((e: any) => {
+        const dt = new Date(e.at).toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        });
+        const reqBy = e.project_changes?.requested_by ?? (e.change_id ? '—' : 'Initial BOQ');
+        const reason = e.project_changes?.reason ?? (e.change_id ? '—' : 'Initial BOQ');
+        const refType = e.project_changes?.reference_type ?? '';
+        const ref = e.project_changes?.reference ?? '';
+        const chgDetails = formatChangeDetails(e.details);
+        const projName = e.projects?.name ?? '—';
+
+        return [
+          projName,
+          dt,
+          (e.event ?? '').toUpperCase(),
+          e.product,
+          e.floor ?? '—',
+          e.room ?? '—',
+          e.location ?? '—',
+          e.quantity ?? 1,
+          chgDetails,
+          reqBy,
+          reason,
+          refType,
+          ref,
+        ];
+      });
+
+      const dateStr = new Date().toISOString().slice(0, 10);
+      downloadCsv(`BOQ_Changes_All_Projects_${dateStr}`, headers, rows);
+    } catch (e: any) {
+      alert(e?.message || 'Failed to export BOQ changes');
+    } finally {
+      setExportingBoq(false);
+    }
+  };
+
   return (
     <div className="min-h-dvh bg-surface-alt pb-16">
       <AppHeader />
@@ -105,13 +186,23 @@ export default function PortfolioDashboardPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={fetchDashboard}
-            className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary shadow-xs hover:bg-surface-alt transition-colors self-start sm:self-auto"
-          >
-            ↻ Refresh Portfolio
-          </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={exportAllBoqChanges}
+              disabled={exportingBoq}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary shadow-xs hover:bg-surface-alt transition-colors disabled:opacity-50"
+            >
+              {exportingBoq ? 'Exporting…' : 'BOQ changes – all projects (CSV)'}
+            </button>
+            <button
+              type="button"
+              onClick={fetchDashboard}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary shadow-xs hover:bg-surface-alt transition-colors"
+            >
+              ↻ Refresh Portfolio
+            </button>
+          </div>
         </div>
 
         {error && (

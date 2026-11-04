@@ -1,8 +1,7 @@
 'use client';
 
-// Edit project details (v4 item 10). Every save records what changed, why, and who asked for it
-// (table project_changes, append-only). Covers the project fields and each BOQ line (location, quantity,
-// brand, make, model) — removing a line is also a logged change.
+// Edit project details & BOQ (v7). Every save records who requested it, when, a reference (email / call / meeting / other)
+// and a reason of >= 10 words. Adds and removes products via edit_boq RPC.
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabaseBrowser } from '@/lib/client/supabase';
@@ -26,10 +25,54 @@ export interface EditableLine {
   make: string | null;
   model: string | null;
 }
-interface ChangeRow { id: string; requested_by: string; reason: string; changes: { what: string; from: string; to: string }[]; created_at: string; profiles: { full_name: string } | null }
+interface ChangeRow {
+  id: string;
+  requested_by: string;
+  requested_at?: string;
+  reason: string;
+  reference_type?: string | null;
+  reference?: string | null;
+  kind?: string;
+  changes: { what: string; from: string; to: string }[] | { added?: number; removed?: number } | any;
+  created_at: string;
+  profiles: { full_name: string } | null;
+}
+
+interface RoomOption {
+  id: string;
+  name: string;
+  floorLabel?: string;
+}
+
+interface CatalogueProduct {
+  id: string;
+  title: string;
+  scope?: string;
+}
+
+interface NewProductRow {
+  tempId: string;
+  room_id: string;
+  product_id: string;
+  location: string;
+  quantity: number;
+}
 
 const STATUS_LABEL: Record<string, string> = { active: 'Active', on_hold: 'On hold', finished: 'Finished', closed: 'Closed' };
+const REFERENCE_TYPES = [
+  { value: 'email', label: 'Email' },
+  { value: 'call', label: 'Call' },
+  { value: 'meeting', label: 'Meeting' },
+  { value: 'other', label: 'Other' },
+] as const;
+
 const s = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : String(v));
+
+function getLocalDatetimeString() {
+  const now = new Date();
+  const offsetMs = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 16);
+}
 
 export function EditProjectDialog({
   project,
@@ -45,23 +88,89 @@ export function EditProjectDialog({
   const [tab, setTab] = useState<'edit' | 'log'>('edit');
   const [p, setP] = useState(project);
   const [ls, setLs] = useState(lines.map((l) => ({ ...l, remove: false })));
+  const [newProducts, setNewProducts] = useState<NewProductRow[]>([]);
+
+  // Room & catalogue options
+  const [roomOptions, setRoomOptions] = useState<RoomOption[]>([]);
+  const [catalogue, setCatalogue] = useState<CatalogueProduct[]>([]);
+
+  // Change request block
   const [requestedBy, setRequestedBy] = useState('');
+  const [requestedAt, setRequestedAt] = useState(getLocalDatetimeString);
+  const [referenceType, setReferenceType] = useState<'email' | 'call' | 'meeting' | 'other'>('email');
+  const [reference, setReference] = useState('');
   const [reason, setReason] = useState('');
+
   const [saving, setSaving] = useState(false);
   useEscape(onClose, saving);
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState<ChangeRow[]>([]);
 
   useEffect(() => {
-    supabaseBrowser()
-      .from('project_changes')
-      .select('id, requested_by, reason, changes, created_at, profiles(full_name)')
+    const sb = supabaseBrowser();
+    // Load change log
+    sb.from('project_changes')
+      .select('id, requested_by, requested_at, reason, reference_type, reference, kind, changes, created_at, profiles(full_name)')
       .eq('project_id', project.id)
       .order('created_at', { ascending: false })
-      .then(({ data }: { data: unknown }) => setLog((data ?? []) as unknown as ChangeRow[]));
+      .then(({ data }: { data: any }) => setLog((data ?? []) as unknown as ChangeRow[]));
+
+    // Load rooms
+    sb.from('rooms')
+      .select('id, name, floors(label)')
+      .eq('project_id', project.id)
+      .order('sort')
+      .then(({ data }: { data: any }) => {
+        if (data) {
+          const rms = data.map((r: any) => ({
+            id: r.id,
+            name: r.name,
+            floorLabel: r.floors?.label,
+          }));
+          setRoomOptions(rms);
+        }
+      });
+
+    // Load catalogue
+    sb.from('product_catalogue')
+      .select('id, title, scope')
+      .order('title')
+      .then(({ data }: { data: any }) => {
+        if (data) setCatalogue(data as CatalogueProduct[]);
+      });
   }, [project.id]);
 
-  const changes = useMemo(() => {
+  // Live word counter
+  const wordCount = useMemo(() => {
+    const words = reason.trim().split(/\s+/).filter(Boolean);
+    return words.length;
+  }, [reason]);
+
+  const hasEnoughWords = wordCount >= 10;
+
+  // Add product row
+  const addProductRow = () => {
+    setNewProducts((prev) => [
+      ...prev,
+      {
+        tempId: crypto.randomUUID(),
+        room_id: roomOptions[0]?.id || '',
+        product_id: catalogue[0]?.id || '',
+        location: '',
+        quantity: 1,
+      },
+    ]);
+  };
+
+  const removeNewProductRow = (tempId: string) => {
+    setNewProducts((prev) => prev.filter((p) => p.tempId !== tempId));
+  };
+
+  const updateNewProductRow = (tempId: string, patch: Partial<NewProductRow>) => {
+    setNewProducts((prev) => prev.map((p) => (p.tempId === tempId ? { ...p, ...patch } : p)));
+  };
+
+  const projectChanges = useMemo(() => {
     const out: { what: string; from: string; to: string }[] = [];
     const fields: [keyof EditableProject, string][] = [
       ['name', 'Project name'], ['client_name', 'Client name'], ['site_address', 'Site address'], ['status', 'Status'],
@@ -72,9 +181,10 @@ export function EditProjectDialog({
       if (a !== b) out.push({ what: label, from: a, to: b });
     }
     for (const l of ls) {
-      const o = lines.find((x) => x.id === l.id)!;
+      const o = lines.find((x) => x.id === l.id);
+      if (!o) continue;
       const name = `${o.title} · ${o.room}`;
-      if (l.remove) { out.push({ what: `${name}: line`, from: `qty ${o.quantity}`, to: 'removed' }); continue; }
+      if (l.remove) continue;
       for (const [k, label] of [['location', 'location'], ['quantity', 'quantity'], ['brand', 'brand'], ['make', 'make'], ['model', 'model']] as const) {
         if (s(o[k]) !== s(l[k])) out.push({ what: `${name}: ${label}`, from: s(o[k]), to: s(l[k]) });
       }
@@ -82,62 +192,161 @@ export function EditProjectDialog({
     return out;
   }, [p, ls, project, lines]);
 
+  const removedProductIds = useMemo(() => ls.filter((l) => l.remove).map((l) => l.id), [ls]);
+
+  const hasAnyChanges =
+    projectChanges.length > 0 ||
+    removedProductIds.length > 0 ||
+    newProducts.length > 0;
+
+  const canSave =
+    hasAnyChanges &&
+    requestedBy.trim().length > 0 &&
+    reference.trim().length > 0 &&
+    referenceType.length > 0 &&
+    hasEnoughWords &&
+    !saving;
+
   async function save() {
     setError(null);
-    if (!changes.length) { setError('Nothing has changed.'); return; }
-    if (!reason.trim() || !requestedBy.trim()) { setError('Say why the change is needed and who requested it.'); return; }
-    if (!p.name.trim()) { setError('The project needs a name.'); return; }
+    if (!hasAnyChanges) {
+      setError('Nothing has changed.');
+      return;
+    }
+    if (!requestedBy.trim()) {
+      setError('Requested by is required.');
+      return;
+    }
+    if (!reference.trim()) {
+      setError('Reference is required.');
+      return;
+    }
+    if (wordCount < 10) {
+      setError('Reason must be at least 10 words.');
+      return;
+    }
+    if (!p.name.trim()) {
+      setError('The project needs a name.');
+      return;
+    }
+
     setSaving(true);
     try {
       const sb = supabaseBrowser();
-      const { error: pErr } = await sb.from('projects').update({
-        name: p.name.trim(), client_name: p.client_name?.trim() || null, site_address: p.site_address?.trim() || null,
-        status: p.status,
-      }).eq('id', p.id);
-      if (pErr) throw pErr;
+      const reqAtIso = requestedAt ? new Date(requestedAt).toISOString() : new Date().toISOString();
+
+      // 1. BOQ Add / Remove via edit_boq RPC
+      const hasBoqAddRemove = removedProductIds.length > 0 || newProducts.length > 0;
+      if (hasBoqAddRemove) {
+        const pAdd = newProducts.map((np) => ({
+          room_id: np.room_id || null,
+          product_id: np.product_id,
+          location: np.location.trim() || null,
+          quantity: Math.max(1, Number(np.quantity) || 1),
+        }));
+
+        const { error: rpcErr } = await sb.rpc('edit_boq', {
+          p_project: p.id,
+          p_add: pAdd,
+          p_remove: removedProductIds,
+          p_requested_by: requestedBy.trim(),
+          p_requested_at: reqAtIso,
+          p_reason: reason.trim(),
+          p_reference_type: referenceType,
+          p_reference: reference.trim(),
+        });
+        if (rpcErr) throw rpcErr;
+      }
+
+      // 2. Project details update
+      const projectMetaChanged =
+        p.name.trim() !== project.name ||
+        (p.client_name?.trim() || null) !== (project.client_name || null) ||
+        (p.site_address?.trim() || null) !== (project.site_address || null) ||
+        p.status !== project.status;
+
+      if (projectMetaChanged) {
+        const { error: pErr } = await sb.from('projects').update({
+          name: p.name.trim(),
+          client_name: p.client_name?.trim() || null,
+          site_address: p.site_address?.trim() || null,
+          status: p.status,
+        }).eq('id', p.id);
+        if (pErr) throw pErr;
+      }
+
+      // 3. Update existing line fields (location, quantity, brand, etc.)
       for (const l of ls) {
-        const o = lines.find((x) => x.id === l.id)!;
-        if (l.remove) {
-          const { error: rErr } = await sb.rpc('remove_room_product', { p_room_product: l.id });
-          if (rErr) throw rErr;
-          continue;
-        }
+        if (l.remove) continue;
+        const o = lines.find((x) => x.id === l.id);
+        if (!o) continue;
         if (s(o.location) !== s(l.location) || o.quantity !== l.quantity || s(o.brand) !== s(l.brand) || s(o.make) !== s(l.make) || s(o.model) !== s(l.model)) {
           const { error: lErr } = await sb.from('room_products').update({
-            location: l.location?.trim() || null, quantity: Math.max(1, Number(l.quantity) || 1),
-            brand: l.brand?.trim() || null, make: l.make?.trim() || null, model: l.model?.trim() || null,
+            location: l.location?.trim() || null,
+            quantity: Math.max(1, Number(l.quantity) || 1),
+            brand: l.brand?.trim() || null,
+            make: l.make?.trim() || null,
+            model: l.model?.trim() || null,
             ...(s(o.location) !== s(l.location) ? { location_validated_at: null, location_validated_by: null } : {}),
           }).eq('id', l.id);
           if (lErr) throw lErr;
         }
       }
-      const { data: u } = await sb.auth.getUser();
-      const { error: cErr } = await sb.from('project_changes').insert({
-        project_id: p.id, changed_by: u.user?.id, requested_by: requestedBy.trim(), reason: reason.trim(), changes,
-      });
-      if (cErr) throw cErr;
-      onSaved(`${changes.length} change${changes.length === 1 ? '' : 's'} saved and logged.`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save');
+
+      // 4. If project details or existing line edits changed without edit_boq RPC, log to project_changes
+      if (!hasBoqAddRemove && projectChanges.length > 0) {
+        const { data: u } = await sb.auth.getUser();
+        const { error: cErr } = await sb.from('project_changes').insert({
+          project_id: p.id,
+          changed_by: u.user?.id,
+          requested_by: requestedBy.trim(),
+          requested_at: reqAtIso,
+          reason: reason.trim(),
+          reference_type: referenceType,
+          reference: reference.trim(),
+          kind: 'project',
+          changes: projectChanges,
+        });
+        if (cErr) throw cErr;
+      }
+
+      onSaved('Project and BOQ changes saved successfully.');
+    } catch (e: any) {
+      setError(e?.message || (typeof e === 'string' ? e : 'Could not save changes'));
     } finally {
       setSaving(false);
     }
   }
 
-  const input = 'mt-1 block w-full rounded-lg border border-border px-3 py-2 text-sm font-normal normal-case tracking-normal';
+  const input = 'mt-1 block w-full rounded-lg border border-border px-3 py-2 text-sm font-normal normal-case tracking-normal bg-surface';
   const label = 'block text-xs font-semibold uppercase tracking-wider text-text-secondary';
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:px-4" onClick={() => !saving && onClose()}>
-      <div role="dialog" aria-modal="true" aria-labelledby="edit-project-title" className="max-h-[92dvh] w-full max-w-3xl overflow-y-auto rounded-t-2xl border border-border bg-surface p-5 shadow-xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-project-title"
+        className="max-h-[92dvh] w-full max-w-4xl overflow-y-auto rounded-t-2xl border border-border bg-surface p-5 shadow-xl sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between gap-3">
-          <h2 id="edit-project-title" className="text-lg font-semibold">Edit project details</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-text-secondary hover:bg-surface-alt"><Glyph name="cross" /></button>
+          <h2 id="edit-project-title" className="text-lg font-semibold">Edit project &amp; BOQ details</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-text-secondary hover:bg-surface-alt">
+            <Glyph name="cross" />
+          </button>
         </div>
         <div className="mt-3 flex gap-1 border-b border-border text-sm">
           {(['edit', 'log'] as const).map((t) => (
-            <button key={t} type="button" onClick={() => setTab(t)} className={`-mb-px border-b-2 px-3 py-2 font-medium ${tab === t ? 'border-accent text-accent' : 'border-transparent text-text-secondary'}`}>
-              {t === 'edit' ? 'Edit' : `Change log (${log.length})`}
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={`-mb-px border-b-2 px-3 py-2 font-medium ${
+                tab === t ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              {t === 'edit' ? 'Edit details & products' : `Change log (${log.length})`}
             </button>
           ))}
         </div>
@@ -150,16 +359,34 @@ export function EditProjectDialog({
                 <p className="text-xs text-text-secondary">
                   {new Date(c.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} ·
                   changed by {c.profiles?.full_name ?? 'unknown'} · requested by <strong className="text-text-primary">{c.requested_by}</strong>
+                  {c.reference_type && (
+                    <span className="ml-1.5 rounded bg-surface-alt px-1.5 py-0.5 text-[10px] font-semibold uppercase text-text-secondary">
+                      {c.reference_type}
+                    </span>
+                  )}
                 </p>
+                {c.reference && (
+                  <p className="mt-1 text-xs text-text-muted italic">Ref: {c.reference}</p>
+                )}
                 <p className="mt-1"><span className="text-text-secondary">Why:</span> {c.reason}</p>
-                <ul className="mt-1.5 space-y-0.5 text-xs text-text-secondary">
-                  {c.changes.map((x, i) => <li key={i}>{x.what}: <s>{x.from}</s> → <span className="text-text-primary">{x.to}</span></li>)}
-                </ul>
+                {Array.isArray(c.changes) && (
+                  <ul className="mt-1.5 space-y-0.5 text-xs text-text-secondary">
+                    {c.changes.map((x: any, i: number) => (
+                      <li key={i}>{x.what}: <s>{x.from}</s> → <span className="text-text-primary">{x.to}</span></li>
+                    ))}
+                  </ul>
+                )}
+                {typeof c.changes === 'object' && !Array.isArray(c.changes) && c.changes && (
+                  <p className="mt-1 text-xs text-text-muted">
+                    Products: +{c.changes.added ?? 0} added, -{c.changes.removed ?? 0} removed
+                  </p>
+                )}
               </li>
             ))}
           </ul>
         ) : (
           <>
+            {/* Project Details */}
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className={label}>Project name<input className={input} value={p.name} onChange={(e) => setP({ ...p, name: e.target.value })} /></label>
               <label className={label}>Client name<input className={input} value={p.client_name ?? ''} onChange={(e) => setP({ ...p, client_name: e.target.value })} /></label>
@@ -171,26 +398,72 @@ export function EditProjectDialog({
               </label>
             </div>
 
-            <h3 className="mt-5 text-sm font-semibold">BOQ lines</h3>
-            <div className="mt-2 max-h-72 overflow-auto rounded-xl border border-border">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead className="sticky top-0 bg-surface text-left text-xs uppercase tracking-wider text-text-secondary">
-                  <tr><th className="px-3 py-2">Product · Room</th><th className="px-2 py-2">Location</th><th className="px-2 py-2 w-16">Qty</th><th className="px-2 py-2">Brand</th><th className="px-2 py-2">Make</th><th className="px-2 py-2">Model</th><th className="px-2 py-2" /></tr>
+            {/* Current Products */}
+            <div className="mt-6 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-text-primary">Current products ({ls.length})</h3>
+                <p className="text-xs text-text-secondary">Room · Product · Location · Qty</p>
+              </div>
+              <button
+                type="button"
+                onClick={addProductRow}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent-hover transition-colors"
+              >
+                <Glyph name="plus" /> Add product
+              </button>
+            </div>
+
+            <div className="mt-2 max-h-60 overflow-auto rounded-xl border border-border">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead className="sticky top-0 bg-surface-alt/90 backdrop-blur-xs text-left text-xs uppercase tracking-wider text-text-secondary">
+                  <tr>
+                    <th className="px-3 py-2">Room</th>
+                    <th className="px-2 py-2">Product</th>
+                    <th className="px-2 py-2">Location</th>
+                    <th className="px-2 py-2 w-16 text-center">Qty</th>
+                    <th className="px-3 py-2 text-right">Action</th>
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {ls.map((l, i) => {
                     const set = (patch: Partial<typeof l>) => setLs(ls.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-                    const cell = 'w-full rounded-md border border-border px-2 py-1 text-sm';
+                    const cell = 'w-full rounded-md border border-border px-2 py-1 text-xs bg-surface';
                     return (
-                      <tr key={l.id} className={l.remove ? 'opacity-40 line-through' : ''}>
-                        <td className="px-3 py-1.5"><span className="font-medium">{l.title}</span><span className="block text-xs text-text-muted">{l.room}</span></td>
-                        <td className="px-2 py-1.5"><input aria-label={`${l.title} location`} className={cell} value={l.location ?? ''} onChange={(e) => set({ location: e.target.value })} /></td>
-                        <td className="px-2 py-1.5"><input aria-label={`${l.title} quantity`} type="number" min={1} className={cell} value={l.quantity} onChange={(e) => set({ quantity: Number(e.target.value) })} /></td>
-                        <td className="px-2 py-1.5"><input aria-label={`${l.title} brand`} className={cell} value={l.brand ?? ''} onChange={(e) => set({ brand: e.target.value })} /></td>
-                        <td className="px-2 py-1.5"><input aria-label={`${l.title} make`} className={cell} value={l.make ?? ''} onChange={(e) => set({ make: e.target.value })} /></td>
-                        <td className="px-2 py-1.5"><input aria-label={`${l.title} model`} className={cell} value={l.model ?? ''} onChange={(e) => set({ model: e.target.value })} /></td>
-                        <td className="px-2 py-1.5 text-right">
-                          <button type="button" onClick={() => set({ remove: !l.remove })} className="text-xs font-medium text-danger hover:underline">{l.remove ? 'Keep' : 'Remove'}</button>
+                      <tr key={l.id} className={l.remove ? 'opacity-40 line-through bg-danger/5' : 'hover:bg-surface-alt/30'}>
+                        <td className="px-3 py-1.5 font-medium text-xs text-text-secondary whitespace-nowrap">{l.room}</td>
+                        <td className="px-2 py-1.5 font-medium text-text-primary">{l.title}</td>
+                        <td className="px-2 py-1.5">
+                          <input
+                            aria-label={`${l.title} location`}
+                            className={cell}
+                            value={l.location ?? ''}
+                            onChange={(e) => set({ location: e.target.value })}
+                            disabled={l.remove}
+                          />
+                        </td>
+                        <td className="px-2 py-1.5 text-center">
+                          <input
+                            aria-label={`${l.title} quantity`}
+                            type="number"
+                            min={1}
+                            className={`${cell} text-center w-16`}
+                            value={l.quantity}
+                            onChange={(e) => set({ quantity: Number(e.target.value) })}
+                            disabled={l.remove}
+                          />
+                        </td>
+                        <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => set({ remove: !l.remove })}
+                            className={`rounded-md px-2 py-1 text-xs font-semibold transition-colors ${
+                              l.remove
+                                ? 'bg-surface-alt text-text-primary hover:bg-surface-alt/80'
+                                : 'text-danger hover:bg-danger-light'
+                            }`}
+                          >
+                            {l.remove ? 'Undo remove' : 'Remove'}
+                          </button>
                         </td>
                       </tr>
                     );
@@ -199,25 +472,189 @@ export function EditProjectDialog({
               </table>
             </div>
 
-            <div className="mt-5 rounded-xl border border-accent/30 bg-accent/5 p-4">
-              <p className="text-sm font-semibold">Log this change</p>
-              <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className={label}>Requested by<input className={input} value={requestedBy} onChange={(e) => setRequestedBy(e.target.value)} placeholder="e.g. Client – Mr Shah" /></label>
-                <label className={label}>Why is the change needed?<input className={input} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Keypad moved to the bedside after site visit" /></label>
+            {/* Added products rows */}
+            {newProducts.length > 0 && (
+              <div className="mt-4 rounded-xl border border-accent/30 bg-accent/5 p-3.5">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-accent mb-2">
+                  New products to add ({newProducts.length})
+                </h4>
+                <div className="space-y-2">
+                  {newProducts.map((np) => (
+                    <div key={np.tempId} className="grid grid-cols-1 gap-2 rounded-lg border border-border bg-surface p-2.5 sm:grid-cols-[1.2fr_1.5fr_1.2fr_70px_36px] sm:items-center">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-text-muted mb-0.5 sm:hidden">Room</label>
+                        <select
+                          className="w-full rounded-md border border-border px-2 py-1.5 text-xs bg-surface"
+                          value={np.room_id}
+                          onChange={(e) => updateNewProductRow(np.tempId, { room_id: e.target.value })}
+                        >
+                          {roomOptions.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.floorLabel ? `${r.floorLabel} · ` : ''}{r.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-text-muted mb-0.5 sm:hidden">Product</label>
+                        <select
+                          className="w-full rounded-md border border-border px-2 py-1.5 text-xs bg-surface"
+                          value={np.product_id}
+                          onChange={(e) => updateNewProductRow(np.tempId, { product_id: e.target.value })}
+                        >
+                          {catalogue.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.title}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-text-muted mb-0.5 sm:hidden">Location</label>
+                        <input
+                          placeholder="Location (e.g. Bedside)"
+                          className="w-full rounded-md border border-border px-2 py-1.5 text-xs bg-surface"
+                          value={np.location}
+                          onChange={(e) => updateNewProductRow(np.tempId, { location: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-text-muted mb-0.5 sm:hidden">Qty</label>
+                        <input
+                          type="number"
+                          min={1}
+                          className="w-full rounded-md border border-border px-2 py-1.5 text-xs text-center bg-surface"
+                          value={np.quantity}
+                          onChange={(e) => updateNewProductRow(np.tempId, { quantity: Math.max(1, parseInt(e.target.value) || 1) })}
+                        />
+                      </div>
+                      <div className="flex justify-end sm:justify-center">
+                        <button
+                          type="button"
+                          onClick={() => removeNewProductRow(np.tempId)}
+                          aria-label="Remove new product row"
+                          className="rounded p-1 text-danger hover:bg-danger-light"
+                        >
+                          <Glyph name="cross" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              {changes.length > 0 && (
-                <ul className="mt-3 space-y-0.5 text-xs text-text-secondary">
-                  {changes.map((x, i) => <li key={i}>{x.what}: <s>{x.from}</s> → <span className="text-text-primary">{x.to}</span></li>)}
-                </ul>
-              )}
+            )}
+
+            {/* Mandatory Change-Request Block */}
+            <div className="mt-5 rounded-xl border border-accent/40 bg-accent/5 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-accent/20 pb-2">
+                <h3 className="text-sm font-bold text-text-primary">Change request (required to save)</h3>
+                <span className="text-xs text-text-muted">Database logs this with reason and reference</span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className={label}>
+                  Requested by *
+                  <input
+                    className={input}
+                    value={requestedBy}
+                    onChange={(e) => setRequestedBy(e.target.value)}
+                    placeholder="e.g. Client – Mr Shah, PMC – Rahul"
+                    required
+                  />
+                </label>
+                <label className={label}>
+                  Date &amp; time requested *
+                  <input
+                    type="datetime-local"
+                    className={input}
+                    value={requestedAt}
+                    onChange={(e) => setRequestedAt(e.target.value)}
+                    required
+                  />
+                </label>
+                <label className={label}>
+                  Reference type *
+                  <select
+                    className={input}
+                    value={referenceType}
+                    onChange={(e) => setReferenceType(e.target.value as any)}
+                    required
+                  >
+                    {REFERENCE_TYPES.map((rt) => (
+                      <option key={rt.value} value={rt.value}>
+                        {rt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={label}>
+                  Reference (paste email or write note) *
+                  <textarea
+                    rows={2}
+                    className={input}
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value)}
+                    placeholder="e.g. Paste email body or 'Call with Mr Shah at 11am confirmed changes'"
+                    required
+                  />
+                </label>
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <label className={label}>Reason (minimum 10 words) *</label>
+                    <span className={`text-xs font-bold tabular-nums ${hasEnoughWords ? 'text-success' : 'text-danger'}`}>
+                      {wordCount} / 10 words {wordCount < 10 && `(${10 - wordCount} more required)`}
+                    </span>
+                  </div>
+                  <textarea
+                    rows={2}
+                    className={`${input} ${!hasEnoughWords && reason.length > 0 ? 'border-danger/50 focus:border-danger' : ''}`}
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="Detailed explanation of why this project / BOQ change was requested..."
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Summary of pending changes */}
+              <div className="mt-3 text-xs text-text-secondary border-t border-accent/15 pt-2">
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span>Changes: {projectChanges.length} metadata</span>
+                  <span>Removed products: {removedProductIds.length}</span>
+                  <span>New products: {newProducts.length}</span>
+                </div>
+              </div>
             </div>
 
             {error && <div role="alert" className="mt-3 rounded-lg bg-danger-light px-3 py-2 text-sm text-danger">{error}</div>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-border px-4 py-2.5 text-sm">Cancel</button>
-              <button type="button" onClick={save} disabled={saving} className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
-                {saving ? 'Saving…' : `Save ${changes.length || ''} change${changes.length === 1 ? '' : 's'}`}
-              </button>
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-text-muted">
+                {!canSave && (
+                  wordCount < 10
+                    ? 'Save disabled: reason must have at least 10 words'
+                    : !requestedBy.trim()
+                    ? 'Save disabled: enter who requested the change'
+                    : !reference.trim()
+                    ? 'Save disabled: enter reference'
+                    : !hasAnyChanges
+                    ? 'No changes made'
+                    : ''
+                )}
+              </p>
+              <div className="flex gap-2 ml-auto">
+                <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-border px-4 py-2 text-sm">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={!canSave}
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent-hover transition-colors"
+                >
+                  {saving ? 'Saving changes…' : 'Save changes'}
+                </button>
+              </div>
             </div>
           </>
         )}
