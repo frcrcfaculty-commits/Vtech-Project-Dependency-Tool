@@ -1,16 +1,16 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabaseBrowser } from '@/lib/client/supabase';
+import { useAuth } from '@/components/auth-provider';
 import { compressImageToWebP } from '@/lib/client/image';
 import { todayIST } from '@/lib/client/date';
+import { downloadCsv } from '@/lib/client/csv';
 import { AppHeader } from '@/components/app-header';
-import { GroupingToggle, type SortBy } from '@/components/v6/grouping-toggle';
-import { Glyph } from '@/components/glass-icon';
 
-interface PendingItem {
+export interface PendingItem {
   id: string;
   project_id: string;
   room_id: string;
@@ -25,6 +25,9 @@ interface PendingItem {
   last_reminded_on: string | null;
   note: string | null;
   photo_path: string | null;
+  action_plan: string | null;
+  action_plan_updated_at: string | null;
+  action_plan_updated_by: string | null;
   updated_at: string;
   waits_on_client?: boolean;
   projects: {
@@ -37,15 +40,18 @@ interface PendingItem {
   rooms: {
     id: string;
     name: string;
+    sort: number;
     floors: {
       id: string;
       label: string;
+      sort: number;
       projects?: PendingItem['projects'];
     } | null;
   } | null;
   project_dependencies: {
     id: string;
     text: string;
+    seq: number;
     agency_types: {
       id: string;
       name: string;
@@ -64,6 +70,8 @@ interface PendingItem {
   room_products?: {
     id: string;
     location: string | null;
+    make: string | null;
+    model: string | null;
     quantity: number;
     product_catalogue?: {
       id: string;
@@ -91,6 +99,19 @@ export function formatPendingItemTitle(item: PendingItem): string {
   return `${roomName} · ${depText}`;
 }
 
+export function formatAgencyLabel(item: PendingItem): string {
+  const typeName = item.project_dependencies?.agency_types?.name ?? item.agencies?.agency_types?.name;
+  const comp = item.agencies?.company_name;
+
+  if (typeName === 'Installer' || typeName === 'Programmer' || typeName === 'Sales') {
+    return `${typeName} – VTech`;
+  }
+  if (comp && typeName && !comp.toLowerCase().includes(typeName.toLowerCase())) {
+    return `${typeName} – ${comp}`;
+  }
+  return comp ?? typeName ?? 'Unassigned';
+}
+
 interface AgencyContact {
   id: string;
   agency_id: string;
@@ -103,14 +124,23 @@ interface AgencyContact {
   active: boolean;
 }
 
-interface ProjectQueueItem {
+interface DraftMessage {
   projectId: string;
   projectName: string;
-  itemIds: string[];
+  agencyId: string;
+  agencyName: string;
+  phone: string | null;
+  email: string | null;
+  text: string;
+  subject: string;
 }
+
+type SortColumn = 'default' | 'project' | 'room' | 'product' | 'agency' | 'date';
+type SortDirection = 'asc' | 'desc';
 
 export default function PendingPage() {
   const router = useRouter();
+  const { profile } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -122,20 +152,29 @@ export default function PendingPage() {
   // 3 Lanes: External · Internal · Waiting on client
   const [activeLane, setActiveLane] = useState<'external' | 'internal' | 'client'>('external');
 
-  // Grouping: Room-wise · Agency-wise · Product-wise
-  const [sortBy, setSortBy] = useState<SortBy>('agency');
+  // Sorting
+  const [sortColumn, setSortColumn] = useState<SortColumn>('default');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   // Selection
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
 
-  // Filters
-  const [projectFilter, setProjectFilter] = useState<string>('all');
-  const [agencyTypeFilter, setAgencyTypeFilter] = useState<string>('all');
-  const [agencyFilter, setAgencyFilter] = useState<string>('all');
+  // Multi-select dropdown filters
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [selectedAgencyIds, setSelectedAgencyIds] = useState<string[]>([]);
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const [agencyDropdownOpen, setAgencyDropdownOpen] = useState(false);
+  const [projectSearch, setProjectSearch] = useState('');
+  const [agencySearch, setAgencySearch] = useState('');
+
   const [ageFilter, setAgeFilter] = useState<'all' | '7' | '14' | '30'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Status sheet modal (Done / N.A. / Edit)
+  // Export dropdown
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  // Status modal (Done / N.A.)
   const [statusTargetItem, setStatusTargetItem] = useState<{
     item: PendingItem;
     targetStatus: 'complete' | 'pending' | 'na';
@@ -149,11 +188,19 @@ export default function PendingPage() {
   // Photo viewer modal
   const [viewingPhotoUrl, setViewingPhotoUrl] = useState<string | null>(null);
 
-  // Reminders queue modal (when multi-project is selected)
-  const [queueProjects, setQueueProjects] = useState<ProjectQueueItem[] | null>(null);
-  const [currentQueueIndex, setCurrentQueueIndex] = useState<number>(0);
-  const [sendingReminders, setSendingReminders] = useState<boolean>(false);
-  const [whatsAppRowLoadingId, setWhatsAppRowLoadingId] = useState<string | null>(null);
+  // Reminder Draft Drawer
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+  const [drawerChannel, setDrawerChannel] = useState<'whatsapp' | 'email'>('whatsapp');
+  const [drawerDrafts, setDrawerDrafts] = useState<DraftMessage[]>([]);
+  const [loadingDrafts, setLoadingDrafts] = useState<boolean>(false);
+  const [sendingRound, setSendingRound] = useState<boolean>(false);
+
+  // Confirmation dialog after opening WhatsApp/Gmail
+  const [confirmDialog, setConfirmDialog] = useState<{
+    dispatchIds: string[];
+    links: { channel: string; url: string; label: string }[];
+  } | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   // Lane classification helper
   const getItemLane = useCallback((item: PendingItem): 'external' | 'internal' | 'client' => {
@@ -167,7 +214,7 @@ export default function PendingPage() {
     return 'external';
   }, []);
 
-  // Load all pending items and active contacts
+  // Load pending data
   const loadPendingData = useCallback(async () => {
     try {
       setLoading(true);
@@ -178,11 +225,11 @@ export default function PendingPage() {
         sb
           .from('dependency_items')
           .select(
-            `id, project_id, room_id, agency_id, room_product_id, step_id, responsibility, status, first_raised_on, completed_on, reminder_count, last_reminded_on, note, photo_path, updated_at,
-             rooms(id, name, floors(id, label, projects(id, name, client_name, l2_after, l3_after))),
-             project_dependencies(id, text, agency_types(id, name, internal)),
+            `id, project_id, room_id, agency_id, room_product_id, step_id, responsibility, status, first_raised_on, completed_on, reminder_count, last_reminded_on, note, photo_path, action_plan, action_plan_updated_at, action_plan_updated_by, updated_at,
+             rooms(id, name, sort, floors(id, label, sort, projects(id, name, client_name, l2_after, l3_after))),
+             project_dependencies(id, text, seq, agency_types(id, name, internal)),
              agencies(id, company_name, agency_types(id, name, internal)),
-             room_products(id, location, quantity, product_catalogue(id, title)),
+             room_products(id, location, make, model, quantity, product_catalogue(id, title)),
              product_steps(id, label, seq, sheet_colour, responsibility)`
           )
           .eq('status', 'pending')
@@ -192,9 +239,7 @@ export default function PendingPage() {
           .select('id, agency_id, project_id, name, designation, level, phone, email, active')
           .eq('active', true)
           .order('level', { ascending: true }),
-        sb
-          .from('item_gate')
-          .select('item_id, waits_on_client'),
+        sb.from('item_gate').select('item_id, waits_on_client'),
       ]);
 
       if (itemsRes.error) throw itemsRes.error;
@@ -206,10 +251,10 @@ export default function PendingPage() {
           .map((g: { item_id: string }) => g.item_id)
       );
 
-      // Type-safe cast of nested Supabase data
       type Raw = Omit<PendingItem, 'projects'> & {
-        rooms: (PendingItem['rooms'] & { floors: { id: string; label: string; projects: PendingItem['projects'] } | null }) | null;
+        rooms: (PendingItem['rooms'] & { floors: { id: string; label: string; sort: number; projects: PendingItem['projects'] } | null }) | null;
       };
+
       const rawItems: PendingItem[] = ((itemsRes.data ?? []) as unknown as Raw[]).map((r) => {
         const isClient =
           clientWaitsSet.has(r.id) ||
@@ -224,6 +269,7 @@ export default function PendingPage() {
           projects: r.rooms?.floors?.projects ?? null,
         };
       });
+
       setItems(rawItems);
       setContacts((contactsRes.data ?? []) as AgencyContact[]);
     } catch (err) {
@@ -237,31 +283,31 @@ export default function PendingPage() {
     loadPendingData();
   }, [loadPendingData]);
 
-  // Listen for global dependency additions (O5: appear in pending list without reload)
+  // Global event listener for dependencies added
   useEffect(() => {
-    const handleAdded = () => {
-      loadPendingData();
-    };
+    const handleAdded = () => loadPendingData();
     window.addEventListener('vtech:dependency-added', handleAdded);
     return () => window.removeEventListener('vtech:dependency-added', handleAdded);
   }, [loadPendingData]);
 
-  // Map contacts by agency_id (sorted by level ASC: level 1 site engineer first)
-  const contactsByAgency = useMemo(() => {
-    const map = new Map<string, AgencyContact[]>();
-    for (const c of contacts) {
-      const list = map.get(c.agency_id) ?? [];
-      list.push(c);
-      map.set(c.agency_id, list);
-    }
-    return map;
-  }, [contacts]);
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-dropdown]')) {
+        setProjectDropdownOpen(false);
+        setAgencyDropdownOpen(false);
+        setExportDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Filter options derived from items
   const filterOptions = useMemo(() => {
     const projectsMap = new Map<string, { id: string; name: string; count: number }>();
-    const agencyTypesSet = new Set<string>();
-    const agenciesMap = new Map<string, { id: string; name: string }>();
+    const agenciesMap = new Map<string, { id: string; name: string; count: number }>();
 
     for (const item of items) {
       if (item.projects) {
@@ -269,16 +315,15 @@ export default function PendingPage() {
         cur.count++;
         projectsMap.set(item.projects.id, cur);
       }
-      const typeName = item.project_dependencies?.agency_types?.name ?? item.agencies?.agency_types?.name;
-      if (typeName) agencyTypesSet.add(typeName);
-      if (item.agencies) {
-        agenciesMap.set(item.agencies.id, { id: item.agencies.id, name: item.agencies.company_name });
-      }
+      const agencyName = formatAgencyLabel(item);
+      const agencyKey = item.agency_id ?? agencyName;
+      const curAg = agenciesMap.get(agencyKey) ?? { id: agencyKey, name: agencyName, count: 0 };
+      curAg.count++;
+      agenciesMap.set(agencyKey, curAg);
     }
 
     return {
       projects: Array.from(projectsMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
-      agencyTypes: Array.from(agencyTypesSet).sort(),
       agencies: Array.from(agenciesMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
     };
   }, [items]);
@@ -301,25 +346,21 @@ export default function PendingPage() {
     const now = Date.now();
 
     return items.filter((item) => {
-      // 3 Lanes Filter (External / Internal / Client)
-      if (getItemLane(item) !== activeLane) {
+      // 3 Lanes Filter
+      if (getItemLane(item) !== activeLane) return false;
+
+      // Multi-select project filter
+      if (selectedProjectIds.length > 0 && !selectedProjectIds.includes(item.project_id)) {
         return false;
       }
 
-      // Project filter
-      if (projectFilter !== 'all' && item.project_id !== projectFilter) {
-        return false;
-      }
-
-      // Agency type filter
-      if (agencyTypeFilter !== 'all') {
-        const typeName = item.project_dependencies?.agency_types?.name ?? item.agencies?.agency_types?.name;
-        if (typeName !== agencyTypeFilter) return false;
-      }
-
-      // Agency filter
-      if (agencyFilter !== 'all' && item.agency_id !== agencyFilter) {
-        return false;
+      // Multi-select agency filter
+      if (selectedAgencyIds.length > 0) {
+        const agencyName = formatAgencyLabel(item);
+        const agencyKey = item.agency_id ?? agencyName;
+        if (!selectedAgencyIds.includes(agencyKey) && (!item.agency_id || !selectedAgencyIds.includes(item.agency_id))) {
+          return false;
+        }
       }
 
       // Age filter
@@ -339,14 +380,16 @@ export default function PendingPage() {
         const room = item.rooms?.name?.toLowerCase() ?? '';
         const floor = item.rooms?.floors?.label?.toLowerCase() ?? '';
         const proj = item.projects?.name?.toLowerCase() ?? '';
-        const agency = item.agencies?.company_name?.toLowerCase() ?? '';
+        const agency = formatAgencyLabel(item).toLowerCase();
+        const actionPlan = item.action_plan?.toLowerCase() ?? '';
         if (
           !formattedTitle.includes(q) &&
           !text.includes(q) &&
           !room.includes(q) &&
           !floor.includes(q) &&
           !proj.includes(q) &&
-          !agency.includes(q)
+          !agency.includes(q) &&
+          !actionPlan.includes(q)
         ) {
           return false;
         }
@@ -354,158 +397,86 @@ export default function PendingPage() {
 
       return true;
     });
-  }, [items, getItemLane, activeLane, projectFilter, agencyTypeFilter, agencyFilter, ageFilter, searchQuery]);
+  }, [items, getItemLane, activeLane, selectedProjectIds, selectedAgencyIds, ageFilter, searchQuery]);
 
-  // Copy plain text status note for client-pending items
-  const handleCopyClientStatusNote = () => {
-    const clientItems = filteredItems;
-    if (clientItems.length === 0) {
-      alert('No client-pending items to summarize.');
-      return;
-    }
+  // Sorted items
+  const sortedItems = useMemo(() => {
+    const list = [...filteredItems];
 
-    const dateStr = new Date().toLocaleDateString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
+    if (sortColumn === 'default') {
+      // Default: grouped by project name, then room sort / floor sort
+      return list.sort((a, b) => {
+        const pA = a.projects?.name ?? '';
+        const pB = b.projects?.name ?? '';
+        const pCmp = pA.localeCompare(pB);
+        if (pCmp !== 0) return pCmp;
 
-    const lines: string[] = [
-      `VTech Site Tracker — Pending Client Items (${dateStr})`,
-      '-------------------------------------------------------',
-    ];
+        const fA = a.rooms?.floors?.sort ?? 0;
+        const fB = b.rooms?.floors?.sort ?? 0;
+        if (fA !== fB) return fA - fB;
 
-    const byProject = new Map<string, PendingItem[]>();
-    clientItems.forEach((item) => {
-      const pName = item.projects?.name ?? 'General Project';
-      const arr = byProject.get(pName) ?? [];
-      arr.push(item);
-      byProject.set(pName, arr);
-    });
+        const rA = a.rooms?.sort ?? 0;
+        const rB = b.rooms?.sort ?? 0;
+        if (rA !== rB) return rA - rB;
 
-    byProject.forEach((pItems, pName) => {
-      lines.push(`\nProject: ${pName} (${pItems.length} item${pItems.length === 1 ? '' : 's'})`);
-      pItems.forEach((item) => {
-        const title = formatPendingItemTitle(item);
-        const days = item.first_raised_on
-          ? ` [Pending for ${Math.floor((Date.now() - new Date(item.first_raised_on).getTime()) / (1000 * 60 * 60 * 24))}d]`
-          : '';
-        const note = item.note ? ` - Note: "${item.note}"` : '';
-        lines.push(` • ${title}${days}${note}`);
+        return (a.rooms?.name ?? '').localeCompare(b.rooms?.name ?? '');
       });
+    }
+
+    list.sort((a, b) => {
+      let cmp = 0;
+      switch (sortColumn) {
+        case 'project': {
+          const pA = a.projects?.name ?? '';
+          const pB = b.projects?.name ?? '';
+          cmp = pA.localeCompare(pB);
+          break;
+        }
+        case 'room': {
+          const rA = a.rooms?.name ?? '';
+          const rB = b.rooms?.name ?? '';
+          cmp = rA.localeCompare(rB);
+          break;
+        }
+        case 'product': {
+          const prA = a.room_products?.product_catalogue?.title ?? a.project_dependencies?.text ?? '';
+          const prB = b.room_products?.product_catalogue?.title ?? b.project_dependencies?.text ?? '';
+          cmp = prA.localeCompare(prB);
+          break;
+        }
+        case 'agency': {
+          const agA = formatAgencyLabel(a);
+          const agB = formatAgencyLabel(b);
+          cmp = agA.localeCompare(agB);
+          break;
+        }
+        case 'date': {
+          const dA = a.first_raised_on ?? '';
+          const dB = b.first_raised_on ?? '';
+          cmp = dA.localeCompare(dB);
+          break;
+        }
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
     });
 
-    lines.push('\nShared via VTech Site Dependency Tracker');
+    return list;
+  }, [filteredItems, sortColumn, sortDirection]);
 
-    navigator.clipboard.writeText(lines.join('\n'));
-    setNotice('Copied status note to clipboard!');
-    setTimeout(() => setNotice(null), 3000);
-  };
-
-  // Download client-pending PDF
-  const handleDownloadClientPendingPdf = async () => {
-    try {
-      const res = await fetch('/api/reports/client-pending.pdf', { method: 'HEAD' });
-      if (res.status === 404 || !res.ok) {
-        alert('Client-pending PDF report is coming soon! (Hermes is currently generating this report route)');
-        return;
-      }
-      window.open('/api/reports/client-pending.pdf', '_blank');
-    } catch {
-      alert('Client-pending PDF report is coming soon!');
-    }
-  };
-
-  // Group filtered items by Project -> (Room | Agency | Product)
-  interface PendingGroup {
-    key: string;
-    label: string;
-    sub?: string;
-    agency?: {
-      id: string;
-      company_name: string;
-      agency_types: { id: string; name: string } | null;
-    } | null;
-    primaryContact?: AgencyContact | null;
-    items: PendingItem[];
-  }
-
-  interface GroupedProject {
-    project: {
-      id: string;
-      name: string;
-      client_name: string | null;
-      l2_after: number | null;
-      l3_after: number | null;
-    };
-    groups: PendingGroup[];
-    totalItems: number;
-  }
-
-  const groupedData: GroupedProject[] = useMemo(() => {
-    const projMap = new Map<string, GroupedProject>();
-
-    for (const item of filteredItems) {
-      const projId = item.project_id;
-      const projData = item.projects ?? {
-        id: projId,
-        name: 'Untitled Project',
-        client_name: null,
-        l2_after: 3,
-        l3_after: 6,
-      };
-
-      if (!projMap.has(projId)) {
-        projMap.set(projId, {
-          project: projData,
-          groups: [],
-          totalItems: 0,
-        });
-      }
-
-      const pGroup = projMap.get(projId)!;
-      pGroup.totalItems++;
-
-      let groupKey: string;
-      let label: string;
-      let sub: string | undefined;
-      const agency = item.agencies ?? null;
-      let primaryContact: AgencyContact | null = null;
-
-      if (sortBy === 'room') {
-        groupKey = item.room_id ?? 'unassigned';
-        label = item.rooms?.name ?? 'Room';
-        sub = item.rooms?.floors?.label ?? undefined;
-      } else if (sortBy === 'product') {
-        groupKey = item.room_products?.product_catalogue?.id ?? item.room_product_id ?? item.project_dependencies?.id ?? item.id;
-        label = item.room_products?.product_catalogue?.title ?? item.project_dependencies?.text ?? 'Dependency';
-        sub = item.room_products?.location ? `Location: ${item.room_products.location}` : undefined;
+  // Toggle sort on header click
+  const handleSort = (col: SortColumn) => {
+    if (sortColumn === col) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
       } else {
-        // sortBy === 'agency'
-        groupKey = item.agency_id ?? 'unassigned';
-        label = item.agencies?.company_name ?? 'No Contractor Assigned';
-        sub = item.agencies?.agency_types?.name ?? undefined;
-        const agencyContacts = item.agency_id ? contactsByAgency.get(item.agency_id) ?? [] : [];
-        primaryContact = agencyContacts.find((c) => c.phone) ?? agencyContacts[0] ?? null;
+        setSortColumn('default');
+        setSortDirection('asc');
       }
-
-      let gGroup = pGroup.groups.find((g) => g.key === groupKey);
-      if (!gGroup) {
-        gGroup = {
-          key: groupKey,
-          label,
-          sub,
-          agency,
-          primaryContact,
-          items: [],
-        };
-        pGroup.groups.push(gGroup);
-      }
-      gGroup.items.push(item);
+    } else {
+      setSortColumn(col);
+      setSortDirection('asc');
     }
-
-    return Array.from(projMap.values()).sort((a, b) => b.totalItems - a.totalItems || a.project.name.localeCompare(b.project.name));
-  }, [filteredItems, sortBy, contactsByAgency]);
+  };
 
   // Selection handlers
   const handleToggleItem = (itemId: string) => {
@@ -517,44 +488,192 @@ export default function PendingPage() {
     });
   };
 
-  const handleToggleGroup = (groupItems: PendingItem[]) => {
-    const ids = groupItems.map((i) => i.id);
-    const allSelected = ids.every((id) => selectedItemIds.has(id));
-    setSelectedItemIds((prev) => {
-      const next = new Set(prev);
-      if (allSelected) {
-        ids.forEach((id) => next.delete(id));
-      } else {
-        ids.forEach((id) => next.add(id));
+  const allVisibleSelected = sortedItems.length > 0 && sortedItems.every((i) => selectedItemIds.has(i.id));
+  const someVisibleSelected = sortedItems.some((i) => selectedItemIds.has(i.id)) && !allVisibleSelected;
+
+  const handleToggleAllVisible = () => {
+    if (allVisibleSelected) {
+      setSelectedItemIds((prev) => {
+        const next = new Set(prev);
+        sortedItems.forEach((i) => next.delete(i.id));
+        return next;
+      });
+    } else {
+      setSelectedItemIds((prev) => {
+        const next = new Set(prev);
+        sortedItems.forEach((i) => next.add(i.id));
+        return next;
+      });
+    }
+  };
+
+  const handleClearSelection = () => setSelectedItemIds(new Set());
+
+  // Individual Reminders drawer trigger
+  const handleOpenReminderDrawer = async (channel: 'whatsapp' | 'email') => {
+    if (selectedItemIds.size === 0) return;
+    setDrawerChannel(channel);
+    setDrawerOpen(true);
+    setLoadingDrafts(true);
+    setError(null);
+
+    try {
+      // Group selected items by project
+      const byProject = new Map<string, { projectName: string; itemIds: string[] }>();
+      for (const item of items) {
+        if (selectedItemIds.has(item.id)) {
+          const p = byProject.get(item.project_id) ?? {
+            projectName: item.projects?.name ?? 'Project',
+            itemIds: [],
+          };
+          p.itemIds.push(item.id);
+          byProject.set(item.project_id, p);
+        }
       }
-      return next;
-    });
-  };
 
-  const handleToggleProjectGroup = (projectItems: GroupedProject) => {
-    const allProjItemIds = projectItems.groups.flatMap((g) => g.items.map((i) => i.id));
-    const allSelected = allProjItemIds.every((id) => selectedItemIds.has(id));
-    setSelectedItemIds((prev) => {
-      const next = new Set(prev);
-      if (allSelected) {
-        allProjItemIds.forEach((id) => next.delete(id));
-      } else {
-        allProjItemIds.forEach((id) => next.add(id));
+      const drafts: DraftMessage[] = [];
+
+      // Fetch preview drafts for each project with itemIds
+      for (const [projectId, pData] of byProject.entries()) {
+        const res = await fetch(`/api/projects/${projectId}/reminder-rounds`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            category: 'all',
+            agencyTypeIds: ['client', 'pmc', 'ele', 'carp', 'sales', 'inst', 'prog'],
+            channel,
+            preview: true,
+            itemIds: pData.itemIds,
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => null);
+          throw new Error(errData?.error ?? `Failed to preview drafts for ${pData.projectName}`);
+        }
+
+        const data = await res.json();
+        for (const d of data.drafts ?? []) {
+          const phone = d.whatsapp?.to?.[0]?.phone ?? null;
+          const email = d.email?.to?.[0]?.email ?? null;
+          const text = channel === 'whatsapp' ? (d.whatsapp?.text ?? '') : (d.email?.text ?? '');
+          const subject = d.email?.subject ?? `Pending items for ${d.agency?.companyName ?? 'Agency'}`;
+
+          drafts.push({
+            projectId,
+            projectName: pData.projectName,
+            agencyId: d.agency?.id ?? '',
+            agencyName: d.agency?.companyName ?? 'Contractor',
+            phone,
+            email,
+            text,
+            subject,
+          });
+        }
       }
-      return next;
-    });
+
+      setDrawerDrafts(drafts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate reminder drafts');
+    } finally {
+      setLoadingDrafts(false);
+    }
   };
 
-  const handleSelectAllFiltered = () => {
-    const allIds = filteredItems.map((i) => i.id);
-    setSelectedItemIds(new Set(allIds));
+  // Send reminders from drawer
+  const handleSendDrafts = async () => {
+    try {
+      setSendingRound(true);
+      setError(null);
+
+      const byProject = new Map<string, string[]>();
+      for (const item of items) {
+        if (selectedItemIds.has(item.id)) {
+          const list = byProject.get(item.project_id) ?? [];
+          list.push(item.id);
+          byProject.set(item.project_id, list);
+        }
+      }
+
+      const allDispatches: any[] = [];
+      const linksToOpen: { channel: string; url: string; label: string }[] = [];
+
+      for (const [projectId, pItemIds] of byProject.entries()) {
+        const res = await fetch(`/api/projects/${projectId}/reminder-rounds`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            category: 'all',
+            agencyTypeIds: ['client', 'pmc', 'ele', 'carp', 'sales', 'inst', 'prog'],
+            channel: drawerChannel,
+            preview: false,
+            itemIds: pItemIds,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.error ?? `Failed to send reminders for project`);
+        }
+
+        const data = await res.json();
+        if (data.dispatches) {
+          allDispatches.push(...data.dispatches);
+        }
+      }
+
+      // Collect links
+      for (const d of allDispatches) {
+        const outcome = d.outcome;
+        const link = outcome?.link ?? outcome?.details?.link;
+        if (link) {
+          linksToOpen.push({
+            channel: d.channel,
+            url: link,
+            label: `${d.agency?.company_name ?? 'Agency'} (${d.channel})`,
+          });
+        }
+      }
+
+      setDrawerOpen(false);
+      setNotice(`Sent reminder round for ${selectedItemIds.size} items.`);
+      setTimeout(() => setNotice(null), 4000);
+
+      if (linksToOpen.length > 0) {
+        // Open the first link in a new tab
+        window.open(linksToOpen[0].url, '_blank');
+        setConfirmDialog({
+          dispatchIds: allDispatches.map((d) => d.id).filter(Boolean),
+          links: linksToOpen,
+        });
+      }
+
+      loadPendingData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send reminders');
+    } finally {
+      setSendingRound(false);
+    }
   };
 
-  const handleClearSelection = () => {
-    setSelectedItemIds(new Set());
+  const handleConfirmDispatches = async (dispatchIds: string[]) => {
+    try {
+      setConfirming(true);
+      for (const id of dispatchIds) {
+        await fetch(`/api/dispatches/${id}/confirm`, { method: 'POST' });
+      }
+      setConfirmDialog(null);
+      setNotice('Dispatches confirmed successfully.');
+      setTimeout(() => setNotice(null), 3000);
+      loadPendingData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to confirm dispatches');
+    } finally {
+      setConfirming(false);
+    }
   };
 
-  // Status Sheet Handlers (Done / N.A.)
+  // Status Modal Handlers (Done / N.A.)
   const handleOpenStatusSheet = (item: PendingItem, targetStatus: 'complete' | 'pending' | 'na') => {
     setStatusTargetItem({ item, targetStatus });
     setStatusDate(todayIST());
@@ -567,8 +686,7 @@ export default function PendingPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setPhotoFile(file);
-    const url = URL.createObjectURL(file);
-    setPhotoPreview(url);
+    setPhotoPreview(URL.createObjectURL(file));
   };
 
   const handleSaveStatus = async () => {
@@ -604,7 +722,6 @@ export default function PendingPage() {
 
       if (rpcErr) throw rpcErr;
 
-      // If status changed to complete or na, remove it from the pending list
       if (targetStatus !== 'pending') {
         setItems((prev) => prev.filter((i) => i.id !== item.id));
         setSelectedItemIds((prev) => {
@@ -614,7 +731,6 @@ export default function PendingPage() {
         });
         setNotice(`Item marked as ${targetStatus === 'complete' ? 'Completed' : 'N.A.'}`);
       } else {
-        // If note or photo updated
         setItems((prev) =>
           prev.map((i) => (i.id === item.id ? { ...i, note: statusNote.trim() || null, photo_path: storagePath } : i))
         );
@@ -630,84 +746,160 @@ export default function PendingPage() {
     }
   };
 
-  // Open photo viewer
+  // View photo
   const handleViewPhoto = async (photoPath: string) => {
     try {
       const sb = supabaseBrowser();
       const { data } = await sb.storage.from('evidence').createSignedUrl(photoPath, 3600);
-      if (data?.signedUrl) {
-        setViewingPhotoUrl(data.signedUrl);
-      }
+      if (data?.signedUrl) setViewingPhotoUrl(data.signedUrl);
     } catch (err) {
       console.error('Failed to load signed photo url:', err);
     }
   };
 
-  // Quick Action: WhatsApp Now for a single item -> navigates to Reminders page
-  const handleWhatsAppNow = (item: PendingItem) => {
-    router.push(`/projects/${item.project_id}/reminders`);
+  // Exports
+  const handleExportPendingCsv = () => {
+    const headers = [
+      'Project',
+      'Floor',
+      'Room',
+      'Product',
+      'Location',
+      'What Pending',
+      'Agency',
+      'First Raised On',
+      'Days Open',
+      'Reminders Sent',
+      'Action Plan',
+      'Note',
+    ];
+    const now = Date.now();
+    const rows = sortedItems.map((item) => {
+      const days = item.first_raised_on
+        ? Math.max(0, Math.floor((now - new Date(item.first_raised_on).getTime()) / (1000 * 60 * 60 * 24)))
+        : 0;
+      return [
+        item.projects?.name ?? '—',
+        item.rooms?.floors?.label ?? '—',
+        item.rooms?.name ?? '—',
+        item.room_products?.product_catalogue?.title ?? item.project_dependencies?.text ?? '—',
+        item.room_products?.location ?? '—',
+        item.product_steps?.label ?? item.project_dependencies?.text ?? '—',
+        formatAgencyLabel(item),
+        item.first_raised_on ?? '—',
+        days,
+        item.reminder_count,
+        item.action_plan ?? '',
+        item.note ?? '',
+      ];
+    });
+    const dStr = new Date().toISOString().slice(0, 10);
+    downloadCsv(`VTech_Pending_Items_${dStr}`, headers, rows);
   };
 
-  // Multi-select Action: Send Reminders
-  const handleInitiateSendReminders = () => {
-    if (selectedItemIds.size === 0) return;
-
-    // Group selected items by project
-    const projMap = new Map<string, { projectId: string; projectName: string; itemIds: string[] }>();
-
-    for (const item of items) {
-      if (selectedItemIds.has(item.id)) {
-        const pId = item.project_id;
-        const pName = item.projects?.name ?? 'Untitled Project';
-        const cur = projMap.get(pId) ?? { projectId: pId, projectName: pName, itemIds: [] };
-        cur.itemIds.push(item.id);
-        projMap.set(pId, cur);
-      }
-    }
-
-    const queueList = Array.from(projMap.values());
-    if (queueList.length === 0) return;
-
-    if (queueList.length === 1) {
-      // Single project: navigate to reminders page
-      router.push(`/projects/${queueList[0].projectId}/reminders`);
-    } else {
-      // Multiple projects: show list with one button per project
-      setQueueProjects(queueList);
-    }
-  };
-
-  const processProjectReminders = async (projQueue: ProjectQueueItem) => {
+  const handleExportAllBoqCsv = async () => {
     try {
-      setSendingReminders(true);
-      setError(null);
+      setExporting('boq_csv');
+      const sb = supabaseBrowser();
+      const { data, error: err } = await sb
+        .from('room_products')
+        .select(`
+          location, make, model, quantity, note,
+          product_catalogue(title),
+          rooms(name, sort, floors(label, sort, projects(name)))
+        `);
+      if (err) throw err;
 
-      const res = await fetch(`/api/projects/${projQueue.projectId}/reminders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ itemIds: projQueue.itemIds }),
+      const headers = ['Project', 'Floor', 'Room', 'Product', 'Location', 'Make', 'Model', 'Quantity', 'Note'];
+      const rows = (data ?? []).map((rp: any) => [
+        rp.rooms?.floors?.projects?.name ?? '—',
+        rp.rooms?.floors?.label ?? '—',
+        rp.rooms?.name ?? '—',
+        rp.product_catalogue?.title ?? '—',
+        rp.location ?? '—',
+        rp.make ?? '—',
+        rp.model ?? '—',
+        rp.quantity || 1,
+        rp.note ?? '',
+      ]);
+      const dStr = new Date().toISOString().slice(0, 10);
+      downloadCsv(`VTech_All_Products_BOQ_${dStr}`, headers, rows);
+    } catch (e: any) {
+      alert(e?.message || 'Failed to export BOQ');
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const handleExportCompletedCsv = async () => {
+    try {
+      setExporting('completed_csv');
+      const sb = supabaseBrowser();
+      const { data, error: err } = await sb
+        .from('dependency_items')
+        .select(`
+          first_raised_on, completed_on, note,
+          rooms(name, floors(label, projects(name))),
+          project_dependencies(text),
+          room_products(location, product_catalogue(title)),
+          product_steps(label),
+          agencies(company_name, agency_types(name))
+        `)
+        .eq('status', 'complete')
+        .order('completed_on', { ascending: false });
+
+      if (err) throw err;
+
+      const headers = [
+        'Project',
+        'Floor',
+        'Room',
+        'Product / Dependency',
+        'Location',
+        'What was pending',
+        'Agency',
+        'First Raised On',
+        'Completed On',
+        'Days to Complete',
+        'Note',
+      ];
+
+      const rows = (data ?? []).map((i: any) => {
+        let days: number | string = '—';
+        if (i.first_raised_on && i.completed_on) {
+          const s = new Date(i.first_raised_on).getTime();
+          const e = new Date(i.completed_on).getTime();
+          days = Math.max(0, Math.round((e - s) / (1000 * 60 * 60 * 24)));
+        }
+        const prod = i.room_products?.product_catalogue?.title ?? i.project_dependencies?.text ?? '—';
+        const agencyName = i.agencies?.company_name
+          ? `${i.agencies?.agency_types?.name ?? ''} – ${i.agencies.company_name}`
+          : '—';
+
+        return [
+          i.rooms?.floors?.projects?.name ?? '—',
+          i.rooms?.floors?.label ?? '—',
+          i.rooms?.name ?? '—',
+          prod,
+          i.room_products?.location ?? '—',
+          i.product_steps?.label ?? i.project_dependencies?.text ?? '—',
+          agencyName,
+          i.first_raised_on ?? '—',
+          i.completed_on ?? '—',
+          days,
+          i.note ?? '',
+        ];
       });
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Failed to create reminders for ${projQueue.projectName} (${res.status})`);
-      }
-
-      const data = await res.json();
-      if (data.visitId) {
-        router.push(`/projects/${projQueue.projectId}/visits/${data.visitId}/dispatches`);
-      } else {
-        setNotice(`No new reminders needed for ${projQueue.projectName}.`);
-        setTimeout(() => setNotice(null), 3000);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send reminders');
+      const dStr = new Date().toISOString().slice(0, 10);
+      downloadCsv(`VTech_Completed_Items_${dStr}`, headers, rows);
+    } catch (e: any) {
+      alert(e?.message || 'Failed to export completed items');
     } finally {
-      setSendingReminders(false);
+      setExporting(null);
     }
   };
 
-  // Helper for age text
   const getDaysOpen = (dateStr: string | null) => {
     if (!dateStr) return 0;
     const raised = new Date(dateStr).getTime();
@@ -725,18 +917,18 @@ export default function PendingPage() {
   };
 
   const totalPending = items.length;
-  const totalProjects = filterOptions.projects.length;
 
   return (
-    <div className="min-h-screen bg-surface-alt pb-28">
+    <div className="min-h-screen bg-surface-alt pb-32">
       <AppHeader />
-      {/* ───────────────────────── HEADER & STATS ───────────────────────── */}
+
+      {/* ───────────────────────── HEADER & TOP METRICS ───────────────────────── */}
       <div className="border-b border-border bg-surface px-4 py-5 shadow-xs">
-        <div className="mx-auto max-w-5xl">
+        <div className="mx-auto max-w-7xl">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold tracking-tight text-text-primary">Pending Dependencies</h1>
+                <h1 className="text-xl font-extrabold tracking-tight text-text-primary">Pending Dependencies</h1>
                 <span className="rounded-full bg-danger/10 px-2.5 py-0.5 text-xs font-bold text-danger">
                   {totalPending} open
                 </span>
@@ -746,7 +938,105 @@ export default function PendingPage() {
               </p>
             </div>
 
+            {/* Top Right: Exports Dropdown & Refresh */}
             <div className="flex items-center gap-2">
+              <div className="relative" data-dropdown>
+                <button
+                  type="button"
+                  onClick={() => setExportDropdownOpen((prev) => !prev)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary shadow-xs hover:bg-surface-alt transition-colors"
+                >
+                  <svg className="h-3.5 w-3.5 text-text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Export
+                  <svg className="h-3 w-3 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {exportDropdownOpen && (
+                  <div className="absolute right-0 mt-1.5 w-60 rounded-xl border border-border bg-surface p-1.5 shadow-xl z-50 text-xs">
+                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">
+                      Pending Items
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExportDropdownOpen(false);
+                        handleExportPendingCsv();
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-text-primary hover:bg-surface-alt font-medium"
+                    >
+                      <span>Pending items (CSV)</span>
+                      <span className="text-[10px] text-text-muted">Filtered</span>
+                    </button>
+                    <a
+                      href={selectedProjectIds.length === 1 ? `/api/reports/pending.pdf?project=${selectedProjectIds[0]}` : '/api/reports/pending.pdf'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setExportDropdownOpen(false)}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-text-primary hover:bg-surface-alt font-medium"
+                    >
+                      <span>Pending items (PDF)</span>
+                      <span className="text-[10px] text-text-muted">Printable</span>
+                    </a>
+
+                    <div className="my-1 border-t border-border/60" />
+                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">
+                      All Products (BOQ)
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExportDropdownOpen(false);
+                        handleExportAllBoqCsv();
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-text-primary hover:bg-surface-alt font-medium"
+                    >
+                      <span>All products BOQ (CSV)</span>
+                      <span className="text-[10px] text-text-muted">Full catalog</span>
+                    </button>
+                    <a
+                      href="/api/reports/boq.pdf"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setExportDropdownOpen(false)}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-text-primary hover:bg-surface-alt font-medium"
+                    >
+                      <span>All products BOQ (PDF)</span>
+                      <span className="text-[10px] text-text-muted">Printable</span>
+                    </a>
+
+                    <div className="my-1 border-t border-border/60" />
+                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">
+                      Completed Items
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExportDropdownOpen(false);
+                        handleExportCompletedCsv();
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-text-primary hover:bg-surface-alt font-medium"
+                    >
+                      <span>Completed items (CSV)</span>
+                      <span className="text-[10px] text-text-muted">History</span>
+                    </button>
+                    <a
+                      href="/api/reports/completed.pdf"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setExportDropdownOpen(false)}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-text-primary hover:bg-surface-alt font-medium"
+                    >
+                      <span>Completed items (PDF)</span>
+                      <span className="text-[10px] text-text-muted">Printable</span>
+                    </a>
+                  </div>
+                )}
+              </div>
+
               <button
                 type="button"
                 onClick={loadPendingData}
@@ -770,63 +1060,11 @@ export default function PendingPage() {
               </button>
             </div>
           </div>
-
-          {/* Top concise projects list: names only */}
-          <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Projects">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={projectFilter === 'all'}
-              onClick={() => setProjectFilter('all')}
-              className={`rounded-xl px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-all ${
-                projectFilter === 'all'
-                  ? 'bg-accent text-white shadow-xs'
-                  : 'border border-border bg-surface text-text-secondary hover:text-text-primary hover:bg-surface-alt'
-              }`}
-            >
-              All projects ({totalPending})
-            </button>
-            {filterOptions.projects.map((p) => {
-              const isSelected = projectFilter === p.id;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isSelected}
-                  onClick={() => setProjectFilter(p.id)}
-                  className={`rounded-xl px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-all ${
-                    isSelected
-                      ? 'bg-accent text-white shadow-xs'
-                      : 'border border-border bg-surface text-text-secondary hover:text-text-primary hover:bg-surface-alt'
-                  }`}
-                >
-                  {p.name}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Quick Metrics Cards */}
-          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <div className="rounded-xl border border-border bg-surface-alt/60 p-2.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Total Pending</span>
-              <p className="mt-0.5 text-lg font-extrabold text-text-primary">{totalPending}</p>
-            </div>
-            <div className="rounded-xl border border-border bg-surface-alt/60 p-2.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Active Projects</span>
-              <p className="mt-0.5 text-lg font-extrabold text-text-primary">{totalProjects}</p>
-            </div>
-            <div className="rounded-xl border border-border bg-surface-alt/60 p-2.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Selected</span>
-              <p className="mt-0.5 text-lg font-extrabold text-accent">{selectedItemIds.size}</p>
-            </div>
-          </div>
         </div>
       </div>
 
       {/* ───────────────────────── NOTICES / ERRORS ───────────────────────── */}
-      <div className="mx-auto max-w-5xl px-4 pt-3">
+      <div className="mx-auto max-w-7xl px-4 pt-3">
         {error && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 p-3 text-xs font-semibold text-danger">
             {error}
@@ -839,8 +1077,8 @@ export default function PendingPage() {
         )}
       </div>
 
-      {/* ───────────────────────── THREE LANES TABS (P4) ───────────────────────── */}
-      <div className="mx-auto max-w-5xl px-4 pt-3">
+      {/* ───────────────────────── THREE LANES TABS ───────────────────────── */}
+      <div className="mx-auto max-w-7xl px-4 pt-3">
         <div className="flex border-b border-border bg-surface rounded-t-xl px-2 pt-2 gap-2 overflow-x-auto">
           <button
             type="button"
@@ -908,44 +1146,12 @@ export default function PendingPage() {
         </div>
       </div>
 
-      {/* ───────────────────────── WAITING ON CLIENT BANNER ───────────────────────── */}
-      {activeLane === 'client' && (
-        <div className="mx-auto max-w-5xl px-4 pt-3">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/90 p-3.5 text-xs">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                <span>Client Dependencies</span>
-              </div>
-              <p className="text-amber-800 text-[11px]">
-                Items waiting on client decisions, selections, or site readiness. Never chased with automated reminders.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={handleCopyClientStatusNote}
-                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 shadow-xs hover:bg-amber-100 transition-colors"
-              >
-                Copy status note
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadClientPendingPdf}
-                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 shadow-xs hover:bg-amber-100 transition-colors"
-              >
-                Download client-pending PDF
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ───────────────────────── FILTERS BAR ───────────────────────── */}
-      <div className="mx-auto max-w-5xl px-4 py-3">
+      {/* ───────────────────────── FILTERS & ACTION BAR ───────────────────────── */}
+      <div className="mx-auto max-w-7xl px-4 py-3">
         <div className="rounded-xl border border-border bg-surface p-3.5 shadow-xs space-y-3">
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-12">
             {/* Search */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-4">
               <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
                 Search
               </label>
@@ -958,131 +1164,258 @@ export default function PendingPage() {
               />
             </div>
 
-            {/* Project Filter */}
-            <div>
+            {/* Project Multi-Select Dropdown */}
+            <div className="lg:col-span-3 relative" data-dropdown>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
-                Project
+                Project ({selectedProjectIds.length === 0 ? 'All' : `${selectedProjectIds.length} selected`})
               </label>
-              <select
-                value={projectFilter}
-                onChange={(e) => setProjectFilter(e.target.value)}
-                className="w-full rounded-lg border border-border bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary focus:border-accent focus:bg-surface focus:outline-none"
+              <button
+                type="button"
+                onClick={() => {
+                  setProjectDropdownOpen((prev) => !prev);
+                  setAgencyDropdownOpen(false);
+                }}
+                className="flex w-full items-center justify-between rounded-lg border border-border bg-surface-alt px-3 py-1.5 text-xs text-text-primary text-left focus:border-accent"
               >
-                <option value="all">All Projects ({totalPending})</option>
-                {filterOptions.projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.count})
-                  </option>
-                ))}
-              </select>
+                <span className="truncate">
+                  {selectedProjectIds.length === 0
+                    ? 'All Projects'
+                    : selectedProjectIds.length === 1
+                    ? filterOptions.projects.find((p) => p.id === selectedProjectIds[0])?.name ?? '1 Project'
+                    : `${selectedProjectIds.length} Projects selected`}
+                </span>
+                <svg className="h-3 w-3 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {projectDropdownOpen && (
+                <div className="absolute left-0 mt-1 w-72 rounded-xl border border-border bg-surface p-2 shadow-xl z-50 space-y-1.5 text-xs">
+                  <input
+                    type="text"
+                    placeholder="Search project…"
+                    value={projectSearch}
+                    onChange={(e) => setProjectSearch(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-surface-alt px-2.5 py-1 text-xs focus:border-accent focus:outline-none"
+                  />
+                  <div className="flex items-center justify-between px-1 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProjectIds([])}
+                      className="text-accent font-semibold hover:underline"
+                    >
+                      Select all
+                    </button>
+                    {selectedProjectIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedProjectIds([])}
+                        className="text-text-muted hover:underline"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-48 overflow-y-auto space-y-0.5 divide-y divide-border/30">
+                    {filterOptions.projects
+                      .filter((p) => p.name.toLowerCase().includes(projectSearch.toLowerCase()))
+                      .map((p) => {
+                        const checked = selectedProjectIds.includes(p.id);
+                        return (
+                          <label
+                            key={p.id}
+                            className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-alt cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setSelectedProjectIds((prev) =>
+                                  checked ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                                );
+                              }}
+                              className="rounded border-border text-accent focus:ring-accent"
+                            />
+                            <span className="flex-1 truncate text-xs text-text-primary font-medium">{p.name}</span>
+                            <span className="text-[10px] text-text-muted">({p.count})</span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Agency Type Filter */}
-            <div>
+            {/* Agency Multi-Select Dropdown */}
+            <div className="lg:col-span-3 relative" data-dropdown>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
-                Agency Type
+                Agency ({selectedAgencyIds.length === 0 ? 'All' : `${selectedAgencyIds.length} selected`})
               </label>
-              <select
-                value={agencyTypeFilter}
-                onChange={(e) => setAgencyTypeFilter(e.target.value)}
-                className="w-full rounded-lg border border-border bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary focus:border-accent focus:bg-surface focus:outline-none"
+              <button
+                type="button"
+                onClick={() => {
+                  setAgencyDropdownOpen((prev) => !prev);
+                  setProjectDropdownOpen(false);
+                }}
+                className="flex w-full items-center justify-between rounded-lg border border-border bg-surface-alt px-3 py-1.5 text-xs text-text-primary text-left focus:border-accent"
               >
-                <option value="all">All Types</option>
-                {filterOptions.agencyTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
+                <span className="truncate">
+                  {selectedAgencyIds.length === 0
+                    ? 'All Agencies'
+                    : selectedAgencyIds.length === 1
+                    ? filterOptions.agencies.find((a) => a.id === selectedAgencyIds[0])?.name ?? '1 Agency'
+                    : `${selectedAgencyIds.length} Agencies selected`}
+                </span>
+                <svg className="h-3 w-3 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {agencyDropdownOpen && (
+                <div className="absolute left-0 mt-1 w-72 rounded-xl border border-border bg-surface p-2 shadow-xl z-50 space-y-1.5 text-xs">
+                  <input
+                    type="text"
+                    placeholder="Search agency…"
+                    value={agencySearch}
+                    onChange={(e) => setAgencySearch(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-surface-alt px-2.5 py-1 text-xs focus:border-accent focus:outline-none"
+                  />
+                  <div className="flex items-center justify-between px-1 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAgencyIds([])}
+                      className="text-accent font-semibold hover:underline"
+                    >
+                      Select all
+                    </button>
+                    {selectedAgencyIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAgencyIds([])}
+                        className="text-text-muted hover:underline"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-48 overflow-y-auto space-y-0.5 divide-y divide-border/30">
+                    {filterOptions.agencies
+                      .filter((a) => a.name.toLowerCase().includes(agencySearch.toLowerCase()))
+                      .map((a) => {
+                        const checked = selectedAgencyIds.includes(a.id);
+                        return (
+                          <label
+                            key={a.id}
+                            className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-alt cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setSelectedAgencyIds((prev) =>
+                                  checked ? prev.filter((id) => id !== a.id) : [...prev, a.id]
+                                );
+                              }}
+                              className="rounded border-border text-accent focus:ring-accent"
+                            />
+                            <span className="flex-1 truncate text-xs text-text-primary font-medium">{a.name}</span>
+                            <span className="text-[10px] text-text-muted">({a.count})</span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Agency Filter */}
-            <div>
+            {/* Age Filter */}
+            <div className="lg:col-span-2">
               <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
-                Agency Contractor
+                Pending since
               </label>
-              <select
-                value={agencyFilter}
-                onChange={(e) => setAgencyFilter(e.target.value)}
-                className="w-full rounded-lg border border-border bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary focus:border-accent focus:bg-surface focus:outline-none"
-              >
-                <option value="all">All Contractors</option>
-                {filterOptions.agencies.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Secondary Row: Grouping Toggle + Pending since Filter */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-2.5">
-            <div className="flex flex-wrap items-center gap-3">
-              <GroupingToggle value={sortBy} onChange={setSortBy} />
-
-              {/* Pending since Filter */}
-              <div className="flex items-center gap-1.5 text-xs">
-                <span className="text-[11px] font-semibold text-text-secondary">Pending since:</span>
+              <div className="flex items-center gap-1">
                 {(['all', '7', '14', '30'] as const).map((age) => (
                   <button
                     key={age}
                     type="button"
                     onClick={() => setAgeFilter(age)}
-                    className={`rounded-md px-2 py-0.5 text-xs font-semibold transition-colors ${
+                    className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors ${
                       ageFilter === age
                         ? 'bg-text-primary text-surface'
                         : 'bg-surface-alt text-text-secondary hover:bg-border'
                     }`}
                   >
-                    {age === 'all' ? 'All' : `> ${age}d`}
+                    {age === 'all' ? 'All' : `>${age}d`}
                   </button>
                 ))}
               </div>
             </div>
+          </div>
 
-            {activeLane !== 'client' && (
-              <div className="flex items-center gap-2">
+          {/* Action Row: Send Reminders (WhatsApp / Email) + Selection Stats */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-2.5">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-text-primary">
+                {selectedItemIds.size > 0 ? (
+                  <span className="text-accent">{selectedItemIds.size} items selected</span>
+                ) : (
+                  <span className="text-text-muted">0 items selected</span>
+                )}
+              </span>
+
+              {selectedItemIds.size > 0 && (
                 <button
                   type="button"
-                  onClick={handleSelectAllFiltered}
-                  className="text-xs font-semibold text-accent hover:underline"
+                  onClick={handleClearSelection}
+                  className="text-xs text-text-muted hover:text-text-primary hover:underline ml-1"
                 >
-                  Select all visible ({filteredItems.length})
+                  Clear
                 </button>
-                {selectedItemIds.size > 0 && (
-                  <>
-                    <span className="text-text-muted">·</span>
-                    <button
-                      type="button"
-                      onClick={handleClearSelection}
-                      className="text-xs font-semibold text-text-muted hover:text-text-primary"
-                    >
-                      Clear selection
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
+              )}
+            </div>
+
+            {/* Individual Reminder Action Buttons (Requirement 15) */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={selectedItemIds.size === 0}
+                onClick={() => handleOpenReminderDrawer('whatsapp')}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 shadow-xs hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title={selectedItemIds.size === 0 ? 'Select items to send reminder' : 'Send WhatsApp reminder for selected items'}
+              >
+                <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.007c.101.005.232-.038.361.275.144.346.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.087-.179.182-.077.357.101.173.449.742.965 1.201.664.591 1.224.774 1.397.86.173.086.275.072.376-.044.101-.116.433-.506.549-.68.116-.173.231-.144.39-.086s1.011.477 1.184.564.289.13.332.202c.043.073.043.419-.101.824z" />
+                </svg>
+                Send WhatsApp {selectedItemIds.size > 0 ? `(${selectedItemIds.size})` : ''}
+              </button>
+
+              <button
+                type="button"
+                disabled={selectedItemIds.size === 0}
+                onClick={() => handleOpenReminderDrawer('email')}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-bold text-accent shadow-xs hover:bg-accent/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title={selectedItemIds.size === 0 ? 'Select items to send reminder' : 'Send Email reminder for selected items'}
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                Send Email {selectedItemIds.size > 0 ? `(${selectedItemIds.size})` : ''}
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ───────────────────────── MAIN LIST ───────────────────────── */}
-      <div className="mx-auto max-w-5xl px-4 pt-1">
+      {/* ───────────────────────── MAIN TABLE (ROW 3 COLUMNS) ───────────────────────── */}
+      <div className="mx-auto max-w-7xl px-4 pt-1">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
             <p className="mt-3 text-xs text-text-secondary">Loading pending dependencies…</p>
           </div>
-        ) : groupedData.length === 0 ? (
+        ) : sortedItems.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border bg-surface p-12 text-center">
-            <svg
-              className="mx-auto h-8 w-8 text-text-muted"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
+            <svg className="mx-auto h-8 w-8 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 13l4 4L19 7" />
             </svg>
             <h3 className="mt-2 text-sm font-bold text-text-primary">No pending dependencies found</h3>
@@ -1095,9 +1428,8 @@ export default function PendingPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setProjectFilter('all');
-                  setAgencyTypeFilter('all');
-                  setAgencyFilter('all');
+                  setSelectedProjectIds([]);
+                  setSelectedAgencyIds([]);
                   setAgeFilter('all');
                   setSearchQuery('');
                 }}
@@ -1108,326 +1440,345 @@ export default function PendingPage() {
             )}
           </div>
         ) : (
-          <div className="space-y-6">
-            {groupedData.map((pGroup) => {
-              const allProjIds = pGroup.groups.flatMap((g) => g.items.map((i) => i.id));
-              const isProjFullySelected = allProjIds.length > 0 && allProjIds.every((id) => selectedItemIds.has(id));
-              const isProjPartiallySelected =
-                allProjIds.some((id) => selectedItemIds.has(id)) && !isProjFullySelected;
+          <div className="rounded-xl border border-border bg-surface shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-surface-alt border-b border-border text-[11px] font-bold text-text-secondary uppercase tracking-wider">
+                    {/* 1. Checkbox */}
+                    <th className="p-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        ref={(el) => {
+                          if (el) el.indeterminate = someVisibleSelected;
+                        }}
+                        onChange={handleToggleAllVisible}
+                        className="rounded border-border text-accent focus:ring-accent"
+                        aria-label="Select all visible items"
+                      />
+                    </th>
 
-              return (
-                <div key={pGroup.project.id} className="rounded-xl border border-border bg-surface shadow-xs overflow-hidden">
-                  {/* Project Header */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface-alt/70 px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      {activeLane !== 'client' && (
-                        <input
-                          type="checkbox"
-                          checked={isProjFullySelected}
-                          ref={(el) => {
-                            if (el) el.indeterminate = isProjPartiallySelected;
-                          }}
-                          onChange={() => handleToggleProjectGroup(pGroup)}
-                          className="rounded border-border text-accent focus:ring-accent"
-                          aria-label={`Select all items in project ${pGroup.project.name}`}
-                        />
-                      )}
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-extrabold text-text-primary">
-                            {pGroup.project.name}
-                          </span>
-                          {pGroup.project.client_name && (
-                            <span className="text-xs text-text-secondary">({pGroup.project.client_name})</span>
-                          )}
-                        </div>
-                        <span className="text-[11px] text-text-muted">
-                          {pGroup.totalItems} pending {pGroup.totalItems === 1 ? 'item' : 'items'}
-                        </span>
+                    {/* 2. Project Name */}
+                    <th
+                      className="p-3 cursor-pointer hover:text-text-primary whitespace-nowrap min-w-[140px]"
+                      onClick={() => handleSort('project')}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Project name</span>
+                        {sortColumn === 'project' && <span>{sortDirection === 'asc' ? '▲' : '▼'}</span>}
                       </div>
-                    </div>
-                  </div>
+                    </th>
 
-                  {/* Groups under Project */}
-                  <div className="divide-y divide-border/60">
-                    {pGroup.groups.map((gGroup) => {
-                      const groupIds = gGroup.items.map((i) => i.id);
-                      const isGroupFullySelected = groupIds.every((id) => selectedItemIds.has(id));
-                      const isGroupPartiallySelected =
-                        groupIds.some((id) => selectedItemIds.has(id)) && !isGroupFullySelected;
+                    {/* 3. Room */}
+                    <th
+                      className="p-3 cursor-pointer hover:text-text-primary whitespace-nowrap min-w-[120px]"
+                      onClick={() => handleSort('room')}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Room</span>
+                        {sortColumn === 'room' && <span>{sortDirection === 'asc' ? '▲' : '▼'}</span>}
+                      </div>
+                    </th>
 
-                      return (
-                        <div key={gGroup.key} className="p-3.5 space-y-3">
-                          {/* Group Subheader */}
-                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-alt/40 px-3 py-2 border border-border/40">
-                            <div className="flex items-center gap-2.5">
-                              {activeLane !== 'client' && (
-                                <input
-                                  type="checkbox"
-                                  checked={isGroupFullySelected}
-                                  ref={(el) => {
-                                    if (el) el.indeterminate = isGroupPartiallySelected;
-                                  }}
-                                  onChange={() => handleToggleGroup(gGroup.items)}
-                                  className="rounded border-border text-accent focus:ring-accent"
-                                  aria-label={`Select all items for ${gGroup.label}`}
-                                />
-                              )}
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-bold text-text-primary">
-                                    {gGroup.label}
-                                  </span>
-                                  {gGroup.sub && (
-                                    <span className="rounded bg-border/60 px-1.5 py-0.2 text-[10px] font-semibold text-text-secondary">
-                                      {gGroup.sub}
-                                    </span>
-                                  )}
-                                  <span className="text-[11px] text-text-muted">
-                                    ({gGroup.items.length})
-                                  </span>
-                                </div>
+                    {/* 4. Product */}
+                    <th
+                      className="p-3 cursor-pointer hover:text-text-primary whitespace-nowrap min-w-[150px]"
+                      onClick={() => handleSort('product')}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Product</span>
+                        {sortColumn === 'product' && <span>{sortDirection === 'asc' ? '▲' : '▼'}</span>}
+                      </div>
+                    </th>
 
-                                {gGroup.primaryContact && (
-                                  <div className="flex items-center gap-2 text-[11px] text-text-secondary mt-0.5">
-                                    <span>
-                                      {gGroup.primaryContact.name} ({gGroup.primaryContact.designation})
-                                    </span>
-                                    {gGroup.primaryContact.phone && (
-                                      <a
-                                        href={`tel:${gGroup.primaryContact.phone}`}
-                                        className="inline-flex items-center gap-1 font-semibold text-accent hover:underline"
-                                        title={`Call ${gGroup.primaryContact.name}`}
-                                      >
-                                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-                                          />
-                                        </svg>
-                                        {gGroup.primaryContact.phone}
-                                      </a>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
+                    {/* 5. Location */}
+                    <th className="p-3 whitespace-nowrap min-w-[100px]">Location</th>
+
+                    {/* 6. What Pending */}
+                    <th className="p-3 whitespace-nowrap min-w-[200px]">What pending</th>
+
+                    {/* 7. Agency */}
+                    <th
+                      className="p-3 cursor-pointer hover:text-text-primary whitespace-nowrap min-w-[150px]"
+                      onClick={() => handleSort('agency')}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Agency</span>
+                        {sortColumn === 'agency' && <span>{sortDirection === 'asc' ? '▲' : '▼'}</span>}
+                      </div>
+                    </th>
+
+                    {/* 8. Pending Since */}
+                    <th
+                      className="p-3 cursor-pointer hover:text-text-primary whitespace-nowrap min-w-[110px]"
+                      onClick={() => handleSort('date')}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Pending since</span>
+                        {sortColumn === 'date' && <span>{sortDirection === 'asc' ? '▲' : '▼'}</span>}
+                      </div>
+                    </th>
+
+                    {/* 9. Action Plan */}
+                    <th className="p-3 whitespace-nowrap min-w-[220px]">Action plan</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-border/60">
+                  {sortedItems.map((item) => {
+                    const isSelected = selectedItemIds.has(item.id);
+                    const daysOpen = getDaysOpen(item.first_raised_on);
+                    const agencyText = formatAgencyLabel(item);
+                    const roomName = item.rooms?.name ?? 'Room';
+                    const floorLabel = item.rooms?.floors?.label ?? 'Floor';
+                    const prodTitle = item.room_products?.product_catalogue?.title ?? item.project_dependencies?.text ?? '—';
+                    const location = item.room_products?.location ?? '—';
+                    const whatPending = item.product_steps?.label ?? item.project_dependencies?.text ?? 'Pending step';
+
+                    return (
+                      <tr
+                        key={item.id}
+                        className={`transition-colors ${
+                          isSelected ? 'bg-accent/5' : 'hover:bg-surface-alt/40'
+                        }`}
+                      >
+                        {/* 1. Checkbox */}
+                        <td className="p-3 text-center align-top pt-3.5">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleItem(item.id)}
+                            className="rounded border-border text-accent focus:ring-accent"
+                            aria-label={`Select item in ${roomName}`}
+                          />
+                        </td>
+
+                        {/* 2. Project Name */}
+                        <td className="p-3 align-top pt-3.5 font-bold text-text-primary">
+                          <div className="font-extrabold text-[13px]">{item.projects?.name ?? '—'}</div>
+                          {item.projects?.client_name && (
+                            <div className="text-[11px] text-text-muted font-normal">{item.projects.client_name}</div>
+                          )}
+                        </td>
+
+                        {/* 3. Room */}
+                        <td className="p-3 align-top pt-3.5">
+                          <div className="font-semibold text-text-primary">{roomName}</div>
+                          <div className="text-[11px] text-text-muted">{floorLabel}</div>
+                        </td>
+
+                        {/* 4. Product */}
+                        <td className="p-3 align-top pt-3.5">
+                          <div className="font-semibold text-text-primary">{prodTitle}</div>
+                          {(item.room_products?.make || item.room_products?.model) && (
+                            <div className="text-[11px] text-text-muted">
+                              {[item.room_products.make, item.room_products.model].filter(Boolean).join(' / ')}
                             </div>
+                          )}
+                        </td>
+
+                        {/* 5. Location */}
+                        <td className="p-3 align-top pt-3.5 text-text-secondary font-medium">
+                          {location}
+                        </td>
+
+                        {/* 6. What Pending */}
+                        <td className="p-3 align-top pt-3.5">
+                          <div className="flex items-center gap-1.5">
+                            {item.product_steps?.sheet_colour && (
+                              <span
+                                className="inline-block w-2.5 h-2.5 rounded-full border border-black/10 flex-shrink-0"
+                                style={{ backgroundColor: `#${item.product_steps.sheet_colour}` }}
+                                title={`Colour: #${item.product_steps.sheet_colour}`}
+                              />
+                            )}
+                            <span className="font-semibold text-text-primary leading-snug">{whatPending}</span>
                           </div>
 
-                          {/* Items Table / Row List */}
-                          <div className="divide-y divide-border/40 border border-border/50 rounded-lg overflow-hidden bg-surface">
-                            {gGroup.items.map((item) => {
-                              const isSelected = selectedItemIds.has(item.id);
-                              const daysOpen = getDaysOpen(item.first_raised_on);
-                              const itemContact = item.agency_id
-                                ? (contactsByAgency.get(item.agency_id)?.find((c) => c.phone) ?? contactsByAgency.get(item.agency_id)?.[0])
-                                : gGroup.primaryContact;
+                          {/* Quick Done / N.A. buttons & Note / Photo */}
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenStatusSheet(item, 'complete')}
+                              className="rounded border border-border px-1.5 py-0.5 text-[10px] font-semibold text-text-primary hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300"
+                            >
+                              Done
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenStatusSheet(item, 'na')}
+                              className="rounded border border-border px-1.5 py-0.5 text-[10px] font-semibold text-text-secondary hover:bg-surface-alt"
+                            >
+                              N.A.
+                            </button>
 
-                              return (
-                                <div
-                                  key={item.id}
-                                  className={`flex flex-col gap-2 p-3 text-xs transition-colors sm:flex-row sm:items-center sm:justify-between ${
-                                    isSelected ? 'bg-accent/5' : 'hover:bg-surface-alt/40'
-                                  }`}
-                                >
-                                  {/* Left: Checkbox + Location + Description */}
-                                  <div className="flex items-start gap-3 sm:max-w-[55%]">
-                                    {activeLane !== 'client' && (
-                                      <input
-                                        type="checkbox"
-                                        checked={isSelected}
-                                        onChange={() => handleToggleItem(item.id)}
-                                        className="mt-0.5 rounded border-border text-accent focus:ring-accent"
-                                        aria-label={`Select dependency: ${formatPendingItemTitle(item)}`}
-                                      />
-                                    )}
-                                    <div className="space-y-1">
-                                      <div className="flex flex-wrap items-center gap-1.5">
-                                        <span className="rounded bg-surface-alt px-1.5 py-0.5 text-[10px] font-bold text-text-secondary border border-border/60">
-                                          {item.rooms?.floors?.label ?? 'Floor'} · {item.rooms?.name ?? 'Room'}
-                                        </span>
-
-                                        {/* Pending since date */}
-                                        <span
-                                          className={`text-[10px] font-medium ${
-                                            daysOpen >= 14 ? 'text-danger font-semibold' : 'text-text-muted'
-                                          }`}
-                                        >
-                                          Pending since {formatPendingDate(item.first_raised_on)}
-                                        </span>
-
-                                        {/* Reminder count */}
-                                        <span className="text-[10px] text-text-muted">
-                                          ({item.reminder_count} {item.reminder_count === 1 ? 'reminder' : 'reminders'})
-                                        </span>
-                                      </div>
-
-                                      <div className="flex items-center gap-1.5">
-                                        {item.product_steps?.sheet_colour && (
-                                          <span
-                                            className="inline-block w-2.5 h-2.5 rounded-full border border-black/10 flex-shrink-0"
-                                            style={{ backgroundColor: `#${item.product_steps.sheet_colour}` }}
-                                            title={`Colour: #${item.product_steps.sheet_colour}`}
-                                          />
-                                        )}
-                                        <p className="font-semibold text-text-primary leading-snug">
-                                          {formatPendingItemTitle(item)}
-                                        </p>
-                                      </div>
-
-                                      {/* Attached Note / Photo */}
-                                      {(item.note || item.photo_path) && (
-                                        <div className="flex items-center gap-2 pt-0.5">
-                                          {item.note && (
-                                            <span className="inline-flex items-center gap-1 text-[11px] text-text-secondary italic">
-                                              <svg className="h-3 w-3 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                                              </svg>
-                                              &quot;{item.note}&quot;
-                                            </span>
-                                          )}
-                                          {item.photo_path && (
-                                            <button
-                                              type="button"
-                                              onClick={() => handleViewPhoto(item.photo_path!)}
-                                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline"
-                                            >
-                                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                              </svg>
-                                              View Photo
-                                            </button>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Right: Quick Action Buttons */}
-                                  <div className="flex flex-wrap items-center gap-1.5 pt-2 sm:pt-0">
-                                    {/* Done button */}
-                                    <button
-                                      type="button"
-                                      role="button"
-                                      onClick={() => handleOpenStatusSheet(item, 'complete')}
-                                      className="rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-text-primary hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition-colors"
-                                      title="Mark Complete"
-                                    >
-                                      Done
-                                    </button>
-
-                                    {/* N.A. button */}
-                                    <button
-                                      type="button"
-                                      role="button"
-                                      onClick={() => handleOpenStatusSheet(item, 'na')}
-                                      className="rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-text-secondary hover:bg-surface-alt transition-colors"
-                                      title="Mark Not Applicable"
-                                    >
-                                      N.A.
-                                    </button>
-
-                                    {/* WhatsApp Now */}
-                                    {activeLane !== 'client' && (
-                                      <button
-                                        type="button"
-                                        disabled={whatsAppRowLoadingId === item.id}
-                                        onClick={() => handleWhatsAppNow(item)}
-                                        className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors disabled:opacity-50"
-                                        title="Draft WhatsApp reminder"
-                                      >
-                                        {whatsAppRowLoadingId === item.id ? (
-                                          <span className="h-3 w-3 animate-spin rounded-full border border-emerald-800 border-t-transparent" />
-                                        ) : (
-                                          <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-                                            <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.007c.101.005.232-.038.361.275.144.346.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.087-.179.182-.077.357.101.173.449.742.965 1.201.664.591 1.224.774 1.397.86.173.086.275.072.376-.044.101-.116.433-.506.549-.68.116-.173.231-.144.39-.086s1.011.477 1.184.564.289.13.332.202c.043.073.043.419-.101.824z" />
-                                          </svg>
-                                        )}
-                                        WhatsApp
-                                      </button>
-                                    )}
-
-                                    {/* Call Contractor */}
-                                    {itemContact?.phone ? (
-                                      <a
-                                        href={`tel:${itemContact.phone}`}
-                                        className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-text-primary hover:bg-surface-alt transition-colors"
-                                        title={`Call ${itemContact.name}: ${itemContact.phone}`}
-                                      >
-                                        <svg className="h-3 w-3 text-text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-                                          />
-                                        </svg>
-                                        Call
-                                      </a>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              );
-                            })}
+                            {item.note && (
+                              <span className="inline-flex items-center gap-0.5 text-[11px] text-text-muted italic">
+                                &quot;{item.note}&quot;
+                              </span>
+                            )}
+                            {item.photo_path && (
+                              <button
+                                type="button"
+                                onClick={() => handleViewPhoto(item.photo_path!)}
+                                className="text-[11px] text-accent hover:underline font-semibold"
+                              >
+                                Photo
+                              </button>
+                            )}
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+                        </td>
+
+                        {/* 7. Agency */}
+                        <td className="p-3 align-top pt-3.5">
+                          <span className="inline-block rounded-md bg-surface-alt px-2 py-0.5 text-xs font-semibold text-text-primary border border-border/60">
+                            {agencyText}
+                          </span>
+                        </td>
+
+                        {/* 8. Pending Since */}
+                        <td className="p-3 align-top pt-3.5 whitespace-nowrap">
+                          <div className="text-xs text-text-primary font-medium">
+                            {formatPendingDate(item.first_raised_on)}
+                          </div>
+                          <div className={`text-[11px] ${daysOpen >= 14 ? 'text-danger font-bold' : 'text-text-muted'}`}>
+                            {daysOpen}d open ({item.reminder_count} rem)
+                          </div>
+                        </td>
+
+                        {/* 9. Action Plan (Inline Editable, Requirement 14) */}
+                        <td className="p-3 align-top pt-3">
+                          <ActionPlanCell
+                            itemId={item.id}
+                            initialValue={item.action_plan}
+                            currentUserId={profile?.id ?? null}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
 
-      {/* ───────────────────────── STICKY ACTION BAR ───────────────────────── */}
-      {activeLane !== 'client' && selectedItemIds.size > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-surface px-4 py-3 shadow-lg">
-          <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-xs font-bold text-white">
-                {selectedItemIds.size}
-              </span>
-              <div>
-                <p className="text-xs font-bold text-text-primary">
-                  {selectedItemIds.size} {selectedItemIds.size === 1 ? 'item' : 'items'} selected
-                </p>
-                <button
-                  type="button"
-                  onClick={handleClearSelection}
-                  className="text-[11px] text-text-secondary hover:underline"
-                >
-                  Clear selection
-                </button>
-              </div>
-            </div>
+      {/* ───────────────────────── DRAWER: DRAFT REMINDER PREVIEW (Requirement 15) ───────────────────────── */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity" onClick={() => setDrawerOpen(false)} />
 
-            <div className="flex items-center gap-2">
+          <div className="relative z-50 flex h-full w-full max-w-lg flex-col border-l border-border bg-surface shadow-2xl">
+            {/* Drawer Header */}
+            <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <div>
+                <h3 className="text-sm font-bold text-text-primary">
+                  Draft Reminders ({selectedItemIds.size} {selectedItemIds.size === 1 ? 'item' : 'items'})
+                </h3>
+                <p className="text-xs text-text-secondary mt-0.5">
+                  Sending via {drawerChannel === 'whatsapp' ? 'WhatsApp' : 'Email'} to responsible contractors
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={handleInitiateSendReminders}
-                disabled={sendingReminders}
+                onClick={() => setDrawerOpen(false)}
+                className="rounded-lg p-1.5 text-text-muted hover:bg-surface-alt hover:text-text-primary"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Drawer Body: Draft messages list */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {loadingDrafts ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                  <p className="mt-2 text-xs text-text-secondary">Generating drafts with selected items…</p>
+                </div>
+              ) : drawerDrafts.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-text-muted">
+                  No reminder messages generated for selected items. (Contractors might be unassigned or already up to date).
+                </div>
+              ) : (
+                drawerDrafts.map((draft, idx) => (
+                  <div key={idx} className="rounded-xl border border-border bg-surface-alt/50 p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-bold text-text-primary">{draft.agencyName}</span>
+                        <span className="text-[11px] text-text-muted ml-2">({draft.projectName})</span>
+                      </div>
+                      <span className="text-[11px] font-semibold text-accent">
+                        {drawerChannel === 'whatsapp' ? draft.phone || 'No phone' : draft.email || 'No email'}
+                      </span>
+                    </div>
+
+                    {drawerChannel === 'email' && (
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-0.5">
+                          Subject
+                        </label>
+                        <input
+                          type="text"
+                          value={draft.subject}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setDrawerDrafts((prev) =>
+                              prev.map((d, i) => (i === idx ? { ...d, subject: val } : d))
+                            );
+                          }}
+                          className="w-full rounded-lg border border-border bg-surface px-2.5 py-1 text-xs text-text-primary focus:border-accent focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-0.5">
+                        Message Content (editable)
+                      </label>
+                      <textarea
+                        rows={7}
+                        value={draft.text}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setDrawerDrafts((prev) =>
+                            prev.map((d, i) => (i === idx ? { ...d, text: val } : d))
+                          );
+                        }}
+                        className="w-full font-mono rounded-lg border border-border bg-surface p-2.5 text-xs text-text-primary leading-relaxed focus:border-accent focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Drawer Footer Actions */}
+            <div className="border-t border-border px-5 py-4 flex items-center justify-between bg-surface">
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                className="rounded-lg border border-border px-3.5 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-alt"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={sendingRound || loadingDrafts || drawerDrafts.length === 0}
+                onClick={handleSendDrafts}
                 className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-accent-hover transition-colors disabled:opacity-50"
               >
-                {sendingReminders ? (
+                {sendingRound ? (
                   <>
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Preparing drafts…
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Opening…
                   </>
                 ) : (
                   <>
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                      />
-                    </svg>
-                    Send Reminders ({selectedItemIds.size})
+                    {drawerChannel === 'whatsapp' ? 'Open in WhatsApp' : 'Send via Gmail'}
                   </>
                 )}
               </button>
@@ -1436,50 +1787,48 @@ export default function PendingPage() {
         </div>
       )}
 
-      {/* ───────────────────────── MODAL: MULTI-PROJECT REMINDER QUEUE ───────────────────────── */}
-      {queueProjects && queueProjects.length > 1 && (
+      {/* ───────────────────────── MODAL: DISPATCH CONFIRMATION ───────────────────────── */}
+      {confirmDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-2xl space-y-4">
             <div className="border-b border-border/60 pb-3">
-              <h3 className="text-sm font-bold text-text-primary">Send Reminders across Projects</h3>
+              <h3 className="text-sm font-bold text-text-primary">Confirm Sent Reminders</h3>
               <p className="text-xs text-text-secondary mt-0.5">
-                You selected items across {queueProjects.length} different projects. Open each project to review and send reminders:
+                We generated links for WhatsApp / Gmail. Click to open any additional tabs, then confirm when sent:
               </p>
             </div>
 
-            <div className="space-y-2">
-              {queueProjects.map((p) => (
-                <div
-                  key={p.projectId}
-                  className="flex items-center justify-between rounded-xl border border-border bg-surface-alt/40 p-3 text-xs"
-                >
-                  <div>
-                    <span className="font-bold text-text-primary">{p.projectName}</span>
-                    <p className="text-[11px] text-text-secondary">
-                      {p.itemIds.length} {p.itemIds.length === 1 ? 'item' : 'items'} selected
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQueueProjects(null);
-                      router.push(`/projects/${p.projectId}/reminders`);
-                    }}
-                    className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors"
+            <div className="space-y-1.5">
+              {confirmDialog.links.map((link, idx) => (
+                <div key={idx} className="flex items-center justify-between rounded-lg bg-surface-alt p-2 text-xs">
+                  <span className="font-semibold text-text-primary">{link.label}</span>
+                  <a
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent font-bold hover:underline"
                   >
-                    Send reminders →
-                  </button>
+                    Open link ↗
+                  </a>
                 </div>
               ))}
             </div>
 
-            <div className="flex items-center justify-end border-t border-border/60 pt-3">
+            <div className="flex items-center justify-end gap-2 border-t border-border/60 pt-3">
               <button
                 type="button"
-                onClick={() => setQueueProjects(null)}
+                onClick={() => setConfirmDialog(null)}
                 className="rounded-lg border border-border px-3.5 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-alt"
               >
-                Close
+                Dismiss
+              </button>
+              <button
+                type="button"
+                disabled={confirming}
+                onClick={() => handleConfirmDispatches(confirmDialog.dispatchIds)}
+                className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition-colors disabled:opacity-50"
+              >
+                {confirming ? 'Saving…' : "I Have Sent It"}
               </button>
             </div>
           </div>
@@ -1497,16 +1846,13 @@ export default function PendingPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="border-b border-border/60 pb-3">
-              <h3 className="text-sm font-bold text-text-primary">
-                Update Dependency Status
-              </h3>
+              <h3 className="text-sm font-bold text-text-primary">Update Dependency Status</h3>
               <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">
-                {statusTargetItem.item.project_dependencies?.text}
+                {statusTargetItem.item.project_dependencies?.text ?? 'Pending step'}
               </p>
             </div>
 
             <div className="space-y-3">
-              {/* Target Status Choice */}
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
                   Status
@@ -1541,7 +1887,6 @@ export default function PendingPage() {
                 </div>
               </div>
 
-              {/* Date observed */}
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
                   Date
@@ -1554,7 +1899,6 @@ export default function PendingPage() {
                 />
               </div>
 
-              {/* Note */}
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
                   Note (optional)
@@ -1568,7 +1912,6 @@ export default function PendingPage() {
                 />
               </div>
 
-              {/* Photo Evidence */}
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
                   Photo Evidence (optional)
@@ -1588,7 +1931,6 @@ export default function PendingPage() {
                 )}
               </div>
 
-              {/* Actions */}
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/60">
                 <button
                   type="button"
@@ -1630,6 +1972,83 @@ export default function PendingPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Inline-Editable Action Plan Cell with Debounce 800ms (Requirement 14)
+// ─────────────────────────────────────────────────────────────────
+function ActionPlanCell({
+  itemId,
+  initialValue,
+  currentUserId,
+}: {
+  itemId: string;
+  initialValue: string | null;
+  currentUserId: string | null;
+}) {
+  const [value, setValue] = useState(initialValue ?? '');
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Sync if initialValue changes externally
+  useEffect(() => {
+    setValue(initialValue ?? '');
+  }, [initialValue]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value;
+    setValue(newVal);
+    setSaved(false);
+
+    if (timerRef.current) clearTimeout(timerRef.current);
+
+    timerRef.current = setTimeout(async () => {
+      try {
+        setSaving(true);
+        const sb = supabaseBrowser();
+        const { error } = await sb
+          .from('dependency_items')
+          .update({
+            action_plan: newVal.trim() || null,
+            action_plan_updated_at: new Date().toISOString(),
+            action_plan_updated_by: currentUserId,
+          })
+          .eq('id', itemId);
+
+        if (error) throw error;
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2500);
+      } catch (err) {
+        console.error('Failed to save action plan:', err);
+      } finally {
+        setSaving(false);
+      }
+    }, 800);
+  };
+
+  return (
+    <div className="relative flex items-center">
+      <input
+        type="text"
+        placeholder="Add action plan…"
+        value={value}
+        onChange={handleChange}
+        maxLength={1000}
+        className="w-full rounded border border-transparent bg-surface-alt/70 px-2 py-1 text-xs text-text-primary placeholder:text-text-muted hover:border-border focus:border-accent focus:bg-surface focus:outline-none transition-colors pr-6"
+      />
+      {saving ? (
+        <span className="absolute right-2 h-2.5 w-2.5 animate-spin rounded-full border border-accent border-t-transparent" />
+      ) : saved ? (
+        <span
+          className="absolute right-2 text-emerald-600 font-bold text-[11px]"
+          title="Saved to database"
+        >
+          ✓
+        </span>
+      ) : null}
     </div>
   );
 }
