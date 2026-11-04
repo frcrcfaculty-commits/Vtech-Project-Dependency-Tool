@@ -794,7 +794,7 @@ export default function ProjectRemindersPage({
                                     {cat.label}
                                   </span>
                                   <span
-                                    className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                                    className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${
                                       cat.itemCount > 0
                                         ? 'bg-amber-100 text-amber-800 border border-amber-200'
                                         : 'bg-surface-alt text-text-muted border border-border'
