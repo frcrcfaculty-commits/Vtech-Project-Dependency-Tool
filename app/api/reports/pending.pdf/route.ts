@@ -8,11 +8,17 @@ export const runtime = 'nodejs';
 
 const one = <T,>(x: unknown): T | null => (Array.isArray(x) ? (x[0] ?? null) : (x ?? null)) as T | null;
 
-export async function GET() {
+export async function GET(req: Request) {
   return handle(async () => {
     const { db } = await requireUser();
-    const { data: projects, error: pErr } = await db.from('projects')
-      .select('id, name, client_name, status').neq('status', 'closed').order('name');
+    const url = new URL(req.url);
+    const filterProjectId = url.searchParams.get('project');
+
+    let pQuery = db.from('projects').select('id, name, client_name, status').neq('status', 'closed');
+    if (filterProjectId) {
+      pQuery = pQuery.eq('id', filterProjectId);
+    }
+    const { data: projects, error: pErr } = await pQuery.order('name');
     if (pErr) throw pErr;
     const ids = (projects ?? []).map((p) => p.id);
 
