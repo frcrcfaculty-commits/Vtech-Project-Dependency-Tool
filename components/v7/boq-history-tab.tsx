@@ -59,6 +59,7 @@ export function BoqHistoryTab({
           .from('boq_events')
           .select('*, project_changes(requested_by, requested_at, reason, reference_type, reference)')
           .eq('project_id', projectId)
+          .not('change_id', 'is', null)
           .order('at', { ascending: false });
 
         if (err) throw err;
@@ -155,7 +156,7 @@ export function BoqHistoryTab({
         <div>
           <h2 className="text-base font-bold text-text-primary">BOQ History</h2>
           <p className="text-xs text-text-secondary">
-            Audit log of all products added, removed, or changed in this project
+            Audit log of all changes made to the BOQ (initial placement omitted)
           </p>
         </div>
 

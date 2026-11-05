@@ -24,6 +24,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ projectId: stri
       .from('boq_events')
       .select('at, event, product, room, floor, project_changes(requested_by, reason, reference_type, reference)')
       .eq('project_id', projectId)
+      .not('change_id', 'is', null)
       .order('at', { ascending: false });
     if (eErr) throw eErr;
 

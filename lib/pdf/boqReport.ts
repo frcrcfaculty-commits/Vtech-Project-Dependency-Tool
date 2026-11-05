@@ -33,6 +33,9 @@ export interface ConsoItem {
   model: string | null;
   totalQuantity: number;
   locations: string;
+  consoGroup?: string | null;
+  consoSort?: number | null;
+  roomsCount?: number;
 }
 
 export interface BoqHistoryItem {
@@ -234,36 +237,77 @@ export async function buildBoqConsoPdf(input: ConsoPdfInput, fonts: PdfFonts): P
 
   tableHeader();
 
-  input.items.forEach((r, idx) => {
-    const makeModelStr = [r.make, r.model].filter(Boolean).join(' / ') || '—';
-    const cells: Record<(typeof cols)[number]['key'], string> = {
-      no: String(idx + 1),
-      product: r.productTitle,
-      makeModel: makeModelStr,
-      qty: String(r.totalQuantity),
-      locations: r.locations,
-    };
+  // Group items by conso_group in conso_sort order
+  const groupMap = new Map<string, { groupName: string; sort: number; items: ConsoItem[]; subtotal: number }>();
 
-    const wrapped = cols.map((c) => wrap(cells[c.key], body, FS, c.w - 2 * PAD));
-    const h = Math.max(...wrapped.map((l) => l.length)) * LH + 2 * PAD;
+  input.items.forEach((it) => {
+    const gName = it.consoGroup || 'Other';
+    const gSort = it.consoSort ?? (gName === 'Other' ? 999 : 90);
+    const existing = groupMap.get(gName) ?? { groupName: gName, sort: gSort, items: [], subtotal: 0 };
+    existing.items.push(it);
+    existing.subtotal += it.totalQuantity;
+    groupMap.set(gName, existing);
+  });
 
-    if (y - h < bottom) {
+  const sortedGroups = [...groupMap.values()].sort((a, b) => a.sort - b.sort || a.groupName.localeCompare(b.groupName));
+
+  let globalIndex = 0;
+
+  sortedGroups.forEach((group) => {
+    // Draw group section header if we have groups
+    const gh = LH + 2 * PAD;
+    if (y - gh < bottom) {
       newPage();
       tableHeader();
     }
 
-    let x = M;
-    cols.forEach((c, i) => {
-      let cy = y - PAD - FS;
-      for (const line of wrapped[i]) {
-        draw(page, line, x + PAD, cy, body, FS);
-        cy -= LH;
-      }
-      x += c.w;
+    page.drawRectangle({
+      x: M,
+      y: y - LH - 2 * PAD + 2,
+      width: A4[0] - 2 * M,
+      height: LH + 2 * PAD,
+      color: rgb(0.91, 0.93, 0.96),
     });
+    const groupHeaderText = `${group.groupName.toUpperCase()} — Subtotal: ${group.subtotal} units (${group.items.length} products)`;
+    draw(page, groupHeaderText, M + PAD, y - LH + 1, bold, FS, rgb(0.12, 0.22, 0.42));
+    y -= gh;
 
-    page.drawLine({ start: { x: M, y: y - h }, end: { x: A4[0] - M, y: y - h }, color: LINE, thickness: 0.5 });
-    y -= h;
+    // Sort items within group by totalQuantity desc, then title
+    const groupSortedItems = [...group.items].sort((a, b) => b.totalQuantity - a.totalQuantity || a.productTitle.localeCompare(b.productTitle));
+
+    groupSortedItems.forEach((r) => {
+      globalIndex++;
+      const makeModelStr = [r.make, r.model].filter(Boolean).join(' / ') || '—';
+      const roomsInfo = r.roomsCount ? ` (${r.roomsCount} rooms)` : '';
+      const cells: Record<(typeof cols)[number]['key'], string> = {
+        no: String(globalIndex),
+        product: r.productTitle,
+        makeModel: makeModelStr,
+        qty: String(r.totalQuantity),
+        locations: r.locations + roomsInfo,
+      };
+
+      const wrapped = cols.map((c) => wrap(cells[c.key], body, FS, c.w - 2 * PAD));
+      const h = Math.max(...wrapped.map((l) => l.length)) * LH + 2 * PAD;
+
+      if (y - h < bottom) {
+        newPage();
+        tableHeader();
+      }
+
+      let x = M;
+      cols.forEach((c, i) => {
+        let cy = y - PAD - FS;
+        for (const line of wrapped[i]) {
+          draw(page, line, x + PAD, cy, body, FS);
+          cy -= LH;
+        }
+        x += c.w;
+      });
+
+      page.drawLine({ start: { x: M, y: y - h }, end: { x: A4[0] - M, y: y - h }, color: LINE, thickness: 0.5 });
+      y -= h;
+    });
   });
 
   pages.forEach((p, i) => {
