@@ -5,6 +5,7 @@ import {
   buildBoqConsoPdf,
   buildBoqHistoryPdf,
 } from '../lib/pdf/boqReport';
+import { buildBoqComparisonPdf } from '../lib/pdf/boqComparisonReport';
 
 describe('BOQ PDFs', () => {
   it('builds Room-wise BOQ PDF with Devanagari names', async () => {
@@ -79,6 +80,62 @@ describe('BOQ PDFs', () => {
             referenceType: 'email',
             reference: 'Email from Rajesh at 10am',
             reason: 'Added additional keypad near entrance for lighting control',
+          },
+        ],
+      },
+      fonts
+    );
+    expect(pdf).toBeInstanceOf(Uint8Array);
+    expect(pdf.length).toBeGreaterThan(1000);
+  });
+
+  it('builds BOQ Comparison PDF with variance and change history', async () => {
+    const fonts = await loadPdfFonts();
+    const pdf = await buildBoqComparisonPdf(
+      {
+        projectName: 'TEST – Sharma Villa',
+        clientName: 'Rajesh Sharma',
+        siteAddress: 'Mumbai',
+        generatedOn: '2026-11-05',
+        comparisonItems: [
+          {
+            consoGroup: 'User interface',
+            consoSort: 1,
+            productTitle: 'Keypad',
+            initialQuantity: 6,
+            currentQuantity: 8,
+            diff: 2,
+          },
+          {
+            consoGroup: 'Audio',
+            consoSort: 40,
+            productTitle: 'Speakers',
+            initialQuantity: 4,
+            currentQuantity: 2,
+            diff: -2,
+          },
+          {
+            consoGroup: 'Misc',
+            consoSort: 90,
+            productTitle: 'Power supply',
+            initialQuantity: 3,
+            currentQuantity: 3,
+            diff: 0,
+          },
+        ],
+        changeEvents: [
+          {
+            at: new Date().toISOString(),
+            event: 'added',
+            product: 'Keypad',
+            floor: 'Ground Floor',
+            room: 'Living Room',
+            location: 'Entrance',
+            quantity: 2,
+            requestedBy: 'Rajesh Sharma',
+            reason: 'Added extra keypad per client walk-through approval',
+            referenceType: 'whatsapp',
+            reference: 'WA group message dated 2 Nov',
           },
         ],
       },
