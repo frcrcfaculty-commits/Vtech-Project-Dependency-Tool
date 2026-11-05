@@ -74,12 +74,12 @@ const CATEGORY_CHIP_COLORS: Record<string, { bg: string; text: string; border: s
 function formatRecipientName(name: string, section: string): string {
   const lower = name.toLowerCase();
   if (section === 'vtech') {
-    if (lower.includes('sales')) return 'Sales';
+    if (lower === 'vtech pm' || lower.includes('sales')) return 'PM';
     if (lower.includes('installer')) return 'Installer';
     if (lower.includes('programmer')) return 'Programmer';
   }
   if (lower.includes('pmc') || lower.includes('architect')) return 'PMC';
-  if (lower.includes('sales')) return 'VTECH Sales';
+  if (lower === 'vtech pm' || lower.includes('sales')) return 'VTECH PM';
   if (lower.includes('installer')) return 'VTECH Installer';
   if (lower.includes('programmer')) return 'VTECH Programmer';
   return name;

@@ -74,8 +74,8 @@ export function getStepDotColor(sheetColour?: string | null): { bg: string; bord
   if (c === 'C9DAF8' || c === 'CFE2F3') return { bg: '#C9DAF8', border: '#A4C2F4', text: '#1155CC', label: 'Other agencies (blue)' };
   if (c === 'E06666') return { bg: '#E06666', border: '#CC0000', text: '#FFFFFF', label: 'VTech Installers (dark red)' };
   if (c === 'F4CCCC') return { bg: '#F4CCCC', border: '#EA9999', text: '#990000', label: 'VTech Programmers (light red)' };
-  if (c === 'F9CB9C') return { bg: '#F9CB9C', border: '#F6B26B', text: '#783F04', label: 'VTECH Sales, handover docs (orange)' };
-  if (c === 'FF00FF') return { bg: '#FF00FF', border: '#C000C0', text: '#FFFFFF', label: 'VTECH Sales (magenta)' };
+  if (c === 'F9CB9C') return { bg: '#F9CB9C', border: '#F6B26B', text: '#783F04', label: 'VTECH PM, handover docs (orange)' };
+  if (c === 'FF00FF') return { bg: '#FF00FF', border: '#C000C0', text: '#FFFFFF', label: 'VTECH PM (magenta)' };
   if (c === '9900FF') return { bg: '#9900FF', border: '#6B00B3', text: '#FFFFFF', label: 'Electrician (purple)' };
   return { bg: '#E2E8F0', border: '#CBD5E1', text: '#475569', label: 'Other' };
 }

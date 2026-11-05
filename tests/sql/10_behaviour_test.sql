@@ -280,7 +280,7 @@ reset role;
 -- ── 0007 product tracking ──
 select pg_temp.assert((select count(*) from public.product_catalogue) = 27, '27 products from the Hansal sheet');
 select pg_temp.assert((select count(*) from public.product_steps) = 163, '163 product steps');
-select pg_temp.assert((select count(*) from public.agency_types where internal) = 5, '5 internal agency types (incl. VTECH Sales Team, 0010)');
+select pg_temp.assert((select count(*) from public.agency_types where internal) = 5, '5 internal agency types (incl. VTECH PM, 0010)');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 set role authenticated;
 create temp table t_sp as select id from public.product_catalogue where title = 'Speakers';
@@ -415,14 +415,14 @@ reset role;
 reset role;
 select pg_temp.assert((select count(*) from public.agency_types where active) = 7, 'v5: exactly 7 active agency groups');
 select pg_temp.assert((select string_agg(name || ':' || coalesce(contact_slots::text, '+'), ',' order by sort) from public.agency_types where active)
-  = 'Client:3,PMC / Architect / Client person:6,Electrician:2,Carpenter:2,VTECH Sales Team:+,VTech Installers:+,VTech Programmers:+', 'v5: groups in order with contact slots');
+  = 'Client:3,PMC / Architect / Client person:6,Electrician:2,Carpenter:2,VTECH PM:+,VTech Installers:+,VTech Programmers:+', 'v5: groups in order with contact slots');
 select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where not t.active) = 0, 'v5: no step defaults to a retired type');
 select pg_temp.assert((select count(*) from public.step_reasons r left join public.agency_types t on lower(t.name) = lower(r.agency_type) where r.agency_type is not null and not coalesce(t.active, false)) = 0, 'v5: every stuck reason points to an active group');
-select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where s.sheet_colour = 'FF00FF' and t.name = 'VTECH Sales Team' and s.responsibility = 'internal') = 5, 'v5: 5 magenta steps belong to VTECH Sales Team');
+select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where s.sheet_colour = 'FF00FF' and t.name = 'VTECH PM' and s.responsibility = 'internal') = 5, 'v5: 5 magenta steps belong to VTECH PM');
 select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where s.sheet_colour = '9900FF' and t.name = 'Electrician') = 5, 'v5: 5 purple steps belong to the electrician');
 select pg_temp.assert((select count(*) from public.reminder_categories) = 6, 'v5: 6 reminder categories (Reminder Format tab + sales)');
 select pg_temp.assert((select string_agg(c.key || ':' || t.name || ':' || r.default_checked, ',' order by c.sort, r.sort) from public.reminder_category_recipients r join public.reminder_categories c on c.key = r.category_key join public.agency_types t on t.id = r.agency_type_id where c.key in ('all', 'electrical'))
-  = 'all:Client:false,all:PMC / Architect / Client person:true,all:Electrician:true,all:Carpenter:true,all:VTECH Sales Team:true,all:VTech Installers:true,all:VTech Programmers:true,electrical:Electrician:true', 'v5+v7: recipients and defaults (HansalV2 col C + sketch)');
+  = 'all:Client:false,all:PMC / Architect / Client person:true,all:Electrician:true,all:Carpenter:true,all:VTECH PM:true,all:VTech Installers:true,all:VTech Programmers:true,electrical:Electrician:true', 'v5+v7: recipients and defaults (HansalV2 col C + sketch)');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 set role authenticated;
 insert into public.projects (name, client_name) values ('TEST – v5', 'v5') ;
@@ -478,7 +478,7 @@ reset role;
 select pg_temp.assert((select string_agg(key || ':' || section, ',' order by sort) from public.reminder_categories)
   = 'all:all,installer:vtech,programmer:vtech,electrical:other,carpentry:other,sales:vtech', 'v7: categories grouped in 3 sections');
 select pg_temp.assert((select string_agg(t.name, ',' order by r.sort) from public.reminder_category_recipients r join public.agency_types t on t.id = r.agency_type_id where r.category_key = 'all')
-  = 'Client,PMC / Architect / Client person,Electrician,Carpenter,VTECH Sales Team,VTech Installers,VTech Programmers', 'v7: All dependencies offers all 7 groups');
+  = 'Client,PMC / Architect / Client person,Electrician,Carpenter,VTECH PM,VTech Installers,VTech Programmers', 'v7: All dependencies offers all 7 groups');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 set role authenticated;
 select pg_temp.assert((select count(*) from public.boq_events where project_id = (select id from t_v5p) and event = 'added') = 1, 'v7: placing a product logs an "added" BOQ event');
