@@ -287,8 +287,8 @@ function Dashboard() {
       if (tLower.includes('program') || sc === 'F4CCCC') {
         return 'Programmer – VTech';
       }
-      if (tLower.includes('sale') || tLower.includes('project manager') || sc === 'FF00FF' || sc === 'F9CB9C') {
-        return 'Sales – VTech';
+      if (tLower === 'vtech pm' || tLower.includes('sale') || tLower.includes('project manager') || sc === 'FF00FF' || sc === 'F9CB9C') {
+        return 'PM – VTech';
       }
       return 'Installer – VTech';
     }

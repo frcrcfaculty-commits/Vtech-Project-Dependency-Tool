@@ -37,8 +37,8 @@ export const STEP_COLOURS: Record<string, { bg: string; ring: string; text: stri
   CFE2F3: { bg: '#CFE2F3', ring: '#93BEE3', text: '#123F99', legend: 'Other agencies (after installation)' },
   E06666: { bg: '#E06666', ring: '#C23B3B', text: '#FFFFFF', legend: 'Installers' },
   F4CCCC: { bg: '#F4CCCC', ring: '#E59A9A', text: '#7A0F0F', legend: 'Programmers' },
-  F9CB9C: { bg: '#F9CB9C', ring: '#EFA35C', text: '#6B3500', legend: 'VTECH Sales (handover docs)' },
-  FF00FF: { bg: '#FF00FF', ring: '#C000C0', text: '#FFFFFF', legend: 'VTECH Sales' },
+  F9CB9C: { bg: '#F9CB9C', ring: '#EFA35C', text: '#6B3500', legend: 'VTECH PM (handover docs)' },
+  FF00FF: { bg: '#FF00FF', ring: '#C000C0', text: '#FFFFFF', legend: 'VTECH PM' },
   '9900FF': { bg: '#9900FF', ring: '#6B00B3', text: '#FFFFFF', legend: 'Electrician' },
 };
 export const LEGEND_ORDER = ['D9EAD3', 'E06666', 'F4CCCC', 'C9DAF8', '9900FF', 'FF00FF', 'F9CB9C'];

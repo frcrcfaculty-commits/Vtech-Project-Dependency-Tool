@@ -17,7 +17,7 @@ const base = {
     { id: 'sales1', companyName: 'VTech Sales', agencyTypeId: 'sales', contacts: [contact('S', 's@vtechpl.com', null)] },
     { id: 'ele1', companyName: 'Sparks', agencyTypeId: 'ele', contacts: [contact('E', 'e@x.in', null)] },
   ],
-  items: [item('i1', 'Electrician'), item('i2', 'VTECH Sales Team', true), item('i3', 'Carpenter')],
+  items: [item('i1', 'Electrician'), item('i2', 'VTECH PM', true), item('i3', 'Carpenter')],
 };
 
 describe('planRound', () => {
@@ -31,7 +31,7 @@ describe('planRound', () => {
   });
 
   it('unticked groups are not messaged; internal groups get [Internal] and no terms', () => {
-    const { messages } = planRound({ ...base, groups: [{ agencyTypeId: 'sales', name: 'VTECH Sales Team', internal: true }] });
+    const { messages } = planRound({ ...base, groups: [{ agencyTypeId: 'sales', name: 'VTECH PM', internal: true }] });
     expect(messages.map((m) => m.agencyId)).toEqual(['sales1']);
     expect(messages[0].report.email!.subject.startsWith('[Internal]')).toBe(true);
     expect(messages[0].report.email!.text).not.toContain('General terms');
@@ -39,10 +39,10 @@ describe('planRound', () => {
 
   it('VTech items go only to VTech groups, never to external ones', () => {
     const { messages } = planRound({ ...base, groups: [
-      { agencyTypeId: 'pmc', name: 'PMC', internal: false }, { agencyTypeId: 'sales', name: 'VTECH Sales Team', internal: true }] });
+      { agencyTypeId: 'pmc', name: 'PMC', internal: false }, { agencyTypeId: 'sales', name: 'VTECH PM', internal: true }] });
     const ext = messages.find((m) => m.agencyId === 'pmc1')!, int = messages.find((m) => m.agencyId === 'sales1')!;
     expect(ext.report.items.map((i) => i.itemId)).not.toContain('i2');
-    expect(ext.report.whatsapp!.text).not.toContain('VTECH Sales Team');
+    expect(ext.report.whatsapp!.text).not.toContain('VTECH PM');
     expect(int.report.items.map((i) => i.itemId)).toContain('i2');
   });
 

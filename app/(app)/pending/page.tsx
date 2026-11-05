@@ -103,7 +103,7 @@ export function formatAgencyLabel(item: PendingItem): string {
   // The assigned agency's type wins; the step's default type is only the fallback for unassigned items.
   const typeName = item.agencies?.agency_types?.name ?? item.project_dependencies?.agency_types?.name;
   const comp = item.agencies?.company_name;
-  const vtech: Record<string, string> = { 'VTech Installers': 'Installer', 'VTech Programmers': 'Programmer', 'VTECH Sales Team': 'Sales' };
+  const vtech: Record<string, string> = { 'VTech Installers': 'Installer', 'VTech Programmers': 'Programmer', 'VTECH PM': 'PM', 'VTECH Sales Team': 'PM' };
   if (typeName && vtech[typeName]) return `${vtech[typeName]} – VTech`;
   if (!comp) return typeName ? `${typeName} – unassigned` : 'Unassigned';
   return typeName && !comp.toLowerCase().includes(typeName.toLowerCase()) ? `${typeName} – ${comp}` : comp;
