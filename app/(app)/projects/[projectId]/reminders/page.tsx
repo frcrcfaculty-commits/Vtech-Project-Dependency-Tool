@@ -74,18 +74,18 @@ const CATEGORY_CHIP_COLORS: Record<string, { bg: string; text: string; border: s
 function formatRecipientName(name: string, section: string): string {
   const lower = name.toLowerCase();
   if (section === 'vtech') {
-    if (lower === 'vtech pm' || lower.includes('sales')) return 'PM';
+    if (lower === 'vtech pm' || lower.includes('sales') || lower.includes('project manager')) return 'VTECH PM';
     if (lower.includes('installer')) return 'Installer';
     if (lower.includes('programmer')) return 'Programmer';
   }
   if (lower.includes('pmc') || lower.includes('architect')) return 'PMC';
-  if (lower === 'vtech pm' || lower.includes('sales')) return 'VTECH PM';
-  if (lower.includes('installer')) return 'VTECH Installer';
-  if (lower.includes('programmer')) return 'VTECH Programmer';
+  if (lower === 'vtech pm' || lower.includes('sales') || lower.includes('project manager')) return 'VTECH PM';
+  if (lower.includes('installer')) return 'Installer';
+  if (lower.includes('programmer')) return 'Programmer';
   return name;
 }
 
-function EyeIcon({ className = 'h-4 w-4' }: { className?: string }) {
+function EyeIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -94,7 +94,7 @@ function EyeIcon({ className = 'h-4 w-4' }: { className?: string }) {
   );
 }
 
-function WhatsAppIcon({ className = 'h-4 w-4' }: { className?: string }) {
+function WhatsAppIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
   return (
     <svg className={className} fill="currentColor" viewBox="0 0 24 24">
       <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.007c.106.005.249-.04.39.299.144.347.491 1.2.534 1.287.043.087.072.188.014.303-.058.116-.087.188-.173.289l-.26.302c-.087.087-.179.182-.077.357.101.174.449.741.964 1.2.662.589 1.221.77 1.394.856.173.086.274.072.375-.043.101-.116.433-.506.549-.679.116-.173.231-.144.39-.086s1.011.477 1.184.563c.173.087.289.13.332.202.043.073.043.419-.101.824z" />
@@ -102,7 +102,7 @@ function WhatsAppIcon({ className = 'h-4 w-4' }: { className?: string }) {
   );
 }
 
-function MailIcon({ className = 'h-4 w-4' }: { className?: string }) {
+function MailIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -302,33 +302,38 @@ export default function ProjectRemindersPage({
     loadCategoriesData();
   }, [loadCategoriesData]);
 
-  // Focused category object
+  // Toggle recipient checkbox
+  const toggleRecipient = (categoryKey: string, agencyTypeId: string) => {
+    setSelectedRecipients((prev) => {
+      const currentSet = new Set(prev[categoryKey] ?? []);
+      if (currentSet.has(agencyTypeId)) {
+        currentSet.delete(agencyTypeId);
+      } else {
+        currentSet.add(agencyTypeId);
+      }
+      return { ...prev, [categoryKey]: currentSet };
+    });
+  };
+
   const focusedCategory = useMemo(() => {
     return categories.find((c) => c.key === focusedCategoryKey) ?? categories[0] ?? null;
   }, [categories, focusedCategoryKey]);
 
-  // Toggle recipient checkbox for a category
-  const toggleRecipient = (categoryKey: string, agencyTypeId: string) => {
-    setSelectedRecipients((prev) => {
-      const curSet = new Set(prev[categoryKey] ?? []);
-      if (curSet.has(agencyTypeId)) {
-        curSet.delete(agencyTypeId);
-      } else {
-        curSet.add(agencyTypeId);
-      }
-      return {
-        ...prev,
-        [categoryKey]: curSet,
-      };
-    });
-  };
-
-  // ───────────────────────── LIVE PREVIEW (300ms debounce) ─────────────────────────
+  // Load preview whenever focusedCategory, its checked recipients, or previewTab change
   useEffect(() => {
-    if (!focusedCategory) return;
-    const currentRecipients = Array.from(selectedRecipients[focusedCategory.key] ?? []);
+    if (!focusedCategory || focusedCategory.itemCount === 0) {
+      setPreviewData(null);
+      return;
+    }
 
-    const timer = setTimeout(async () => {
+    const recipientIds = Array.from(selectedRecipients[focusedCategory.key] ?? []);
+    if (recipientIds.length === 0) {
+      setPreviewData(null);
+      return;
+    }
+
+    let isCancelled = false;
+    const fetchPreview = async () => {
       setPreviewLoading(true);
       try {
         const res = await fetch(`/api/projects/${projectId}/reminder-rounds`, {
@@ -336,115 +341,99 @@ export default function ProjectRemindersPage({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             category: focusedCategory.key,
-            agencyTypeIds: currentRecipients,
+            agencyTypeIds: recipientIds,
             channel: previewTab,
             preview: true,
           }),
         });
 
-        if (res.ok) {
-          const data: PreviewResult = await res.json();
-          setPreviewData(data);
-        } else {
-          const msg = await res.json().then((j: { error?: string }) => j.error).catch(() => null);
-          setPreviewData({
-            email: null,
-            whatsapp: null,
-            itemCount: focusedCategory.itemCount,
-            warnings: [msg ?? `Preview failed (${res.status})`],
-          });
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.error || `Failed to load draft preview (${res.status})`);
         }
-      } catch {
-        setPreviewData(null);
+
+        const data: PreviewResult = await res.json();
+        if (!isCancelled) {
+          setPreviewData(data);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          console.error('Preview error:', err);
+          setPreviewData(null);
+        }
       } finally {
-        setPreviewLoading(false);
+        if (!isCancelled) setPreviewLoading(false);
       }
-    }, 300);
+    };
 
-    return () => clearTimeout(timer);
-  }, [focusedCategory, selectedRecipients, previewTab, projectId, projectName]);
+    fetchPreview();
+    return () => {
+      isCancelled = true;
+    };
+  }, [projectId, focusedCategory, selectedRecipients, previewTab]);
 
-  // ───────────────────────── SEND REMINDERS ACTION ─────────────────────────
+  // Dispatch reminders
   const handleSendReminder = async (cat: ReminderCategory, channel: 'email' | 'whatsapp') => {
-    if (cat.itemCount === 0) return;
-    const chosenTypeIds = Array.from(selectedRecipients[cat.key] ?? []);
-    if (chosenTypeIds.length === 0) {
-      alert('Please select at least one recipient group to send reminders.');
+    const recipientIds = Array.from(selectedRecipients[cat.key] ?? []);
+    if (recipientIds.length === 0) {
+      setError(`Please select at least one recipient group for ${cat.label}.`);
       return;
     }
 
-    setSendingState({ key: cat.key, channel });
-    setError(null);
-
     try {
+      setSendingState({ key: cat.key, channel });
+      setError(null);
+
       const res = await fetch(`/api/projects/${projectId}/reminder-rounds`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           category: cat.key,
-          agencyTypeIds: chosenTypeIds,
+          agencyTypeIds: recipientIds,
           channel,
           preview: false,
         }),
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Failed to send ${channel} reminders (${res.status})`);
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.error || `Failed to send reminders (${res.status})`);
       }
 
-      const data: {
-        visitId: string;
-        dispatches: DispatchResult[];
-        warnings?: string[];
-      } = await res.json();
+      const result = await res.json();
+      const dispatches: any[] = result.dispatches ?? [];
 
-      const selectedNames = cat.recipients
-        .filter((r) => chosenTypeIds.includes(r.agencyTypeId))
-        .map((r) => r.name);
+      const needsConfirmation = dispatches.filter(
+        (d) => d.id && (d.outcome?.status ?? 'needs_confirmation') === 'needs_confirmation'
+      );
 
-      showToast(`Reminder sent: ${cat.label} -> ${selectedNames.join(', ')}`);
-
-      const allLinks: { label: string; url: string }[] = [];
-      const waDispatchIds: string[] = [];
-
-      interface RawDispatch {
-        id: string;
-        channel: string;
-        links?: { label: string; url: string }[];
-        outcome?: { status?: string; links?: { label: string; url: string }[] };
-      }
-
-      ((data.dispatches ?? []) as unknown as RawDispatch[]).forEach((d) => {
-        const links = d.links || d.outcome?.links;
-        if (links && Array.isArray(links)) {
-          allLinks.push(...links);
-        }
-        if (d.id && (d.outcome?.status ?? 'needs_confirmation') === 'needs_confirmation') {
-          waDispatchIds.push(d.id);
+      const links: { label: string; url: string }[] = [];
+      dispatches.forEach((d) => {
+        const url = d.outcome?.link || d.outcome?.details?.link;
+        if (url) {
+          links.push({
+            label: `${d.agency?.companyName || d.agency || 'Agency'} (${d.channel})`,
+            url,
+          });
         }
       });
 
-      let blockedPopup = false;
-      allLinks.forEach((link) => {
-        const w = window.open(link.url, '_blank');
-        if (!w || w.closed || typeof w.closed === 'undefined') {
-          blockedPopup = true;
+      if (links.length > 0) {
+        const first = window.open(links[0].url, '_blank');
+        if (!first || first.closed || typeof first.closed === 'undefined') {
+          setPopupLinksModal({
+            title: `Your browser blocked popups. Open ${channel === 'whatsapp' ? 'WhatsApp' : 'Gmail'} manually:`,
+            links,
+          });
         }
-      });
-
-      if (blockedPopup && allLinks.length > 0) {
-        setPopupLinksModal({
-          title: `${cat.label} -- ${channel.toUpperCase()} Dispatches`,
-          links: allLinks,
-        });
-      }
-
-      if (waDispatchIds.length > 0) {
-        setConfirmDialog({
-          dispatchIds: waDispatchIds,
-          links: allLinks,
-        });
+        if (needsConfirmation.length > 0) {
+          setConfirmDialog({
+            dispatchIds: needsConfirmation.map((d) => d.id),
+            links,
+          });
+        }
+      } else {
+        showToast(`Reminders sent successfully for ${cat.label}!`);
       }
 
       await loadCategoriesData();
@@ -489,7 +478,7 @@ export default function ProjectRemindersPage({
       {
         id: 'vtech',
         title: 'VTECH dependencies',
-        subtitle: 'Internal team follow-ups (Installer, Programmer, Sales)',
+        subtitle: 'Internal team follow-ups (Installer, Programmer, PM)',
         categories: vtechCats,
       },
       {
@@ -501,12 +490,26 @@ export default function ProjectRemindersPage({
     ];
   }, [categories]);
 
+  // Recipient chips extracted from previewData
+  const recipientChips = useMemo(() => {
+    if (!previewData?.drafts) return [];
+    const list: string[] = [];
+    previewData.drafts.forEach((d) => {
+      if (previewTab === 'email' && d.email) {
+        d.email.to.forEach((p) => list.push(personLabel(p)));
+      } else if (previewTab === 'whatsapp' && d.whatsapp) {
+        d.whatsapp.to.forEach((p) => list.push(personLabel(p)));
+      }
+    });
+    return Array.from(new Set(list));
+  }, [previewData, previewTab]);
+
   // Preview content component
   const renderPreviewContent = () => {
     if (previewLoading) {
       return (
-        <div className="flex justify-center py-12">
-          <svg className="h-6 w-6 animate-spin text-accent" viewBox="0 0 24 24" fill="none">
+        <div className="flex flex-1 items-center justify-center py-20">
+          <svg className="h-7 w-7 animate-spin text-accent" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
@@ -516,65 +519,65 @@ export default function ProjectRemindersPage({
 
     if (!focusedCategory || focusedCategory.itemCount === 0) {
       return (
-        <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-text-muted">
+        <div className="rounded-xl border border-dashed border-border p-12 text-center text-xs text-text-muted">
           No pending items for {focusedCategory?.label ?? 'this category'}.
         </div>
       );
     }
 
     return (
-      <div className="space-y-3">
+      <div className="flex-1 flex flex-col space-y-3 min-h-[440px]">
+        {/* Recipients chips above draft */}
+        <div className="flex flex-wrap items-center gap-1.5 p-2.5 rounded-xl bg-surface-alt/70 border border-border">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted mr-1">
+            Recipients:
+          </span>
+          {recipientChips.length > 0 ? (
+            recipientChips.map((chip, idx) => (
+              <span
+                key={idx}
+                className="inline-flex items-center rounded-md bg-surface px-2 py-0.5 text-[11px] font-medium text-text-primary border border-border/80 shadow-2xs"
+              >
+                {chip}
+              </span>
+            ))
+          ) : (
+            <span className="text-xs text-text-muted italic">No contacts available on selected groups</span>
+          )}
+        </div>
+
         {previewTab === 'email' ? (
-          <div className="space-y-2.5 text-xs">
-            <div className="rounded-lg bg-surface-alt p-2.5 border border-border space-y-1">
-              <div>
-                <span className="font-semibold text-text-secondary">To: </span>
-                <span className="text-text-primary">
-                  {previewData?.drafts?.some((d) => d.email)
-                    ? previewData.drafts.flatMap((d) => d.email?.to ?? []).map(personLabel).join(', ')
-                    : 'No recipient email'}
-                </span>
-              </div>
-              <div>
-                <span className="font-semibold text-text-secondary">Subject: </span>
-                <span className="text-text-primary font-mono text-[11px]">
-                  {previewData?.email?.subject || `Pending Dependencies -- ${projectName}`}
+          <div className="flex-1 flex flex-col space-y-2 text-xs">
+            <div className="rounded-xl border border-border bg-surface px-3 py-2 space-y-1 shadow-2xs">
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-[11px] text-text-secondary">Subject: </span>
+                <span className="text-text-primary font-mono text-[11px] truncate">
+                  {previewData?.email?.subject || `Pending Dependencies — ${projectName}`}
                 </span>
               </div>
             </div>
 
-            <div className="rounded-xl border border-border overflow-hidden bg-white">
+            <div className="flex-1 rounded-xl border border-border overflow-hidden bg-white shadow-2xs min-h-[400px]">
               {previewData?.email?.html ? (
                 <iframe
                   title="Email Preview"
                   srcDoc={previewData.email.html}
                   sandbox="allow-same-origin"
-                  className="w-full h-72 border-0 text-text-primary"
+                  className="w-full h-full min-h-[400px] border-0 text-text-primary"
                 />
               ) : (
-                <pre className="p-3 text-[11px] font-sans whitespace-pre-wrap text-text-primary leading-relaxed h-72 overflow-y-auto">
+                <pre className="p-4 text-xs font-sans whitespace-pre-wrap text-text-primary leading-relaxed h-full overflow-y-auto">
                   {previewData?.email?.text || 'No email draft available.'}
                 </pre>
               )}
             </div>
           </div>
         ) : (
-          <div className="space-y-2.5 text-xs">
-            <div className="rounded-lg bg-surface-alt p-2.5 border border-border">
-              <span className="font-semibold text-text-secondary">Recipients: </span>
-              <span className="text-text-primary">
-                {previewData?.drafts?.some((d) => d.whatsapp)
-                  ? previewData.drafts.flatMap((d) => d.whatsapp?.to ?? []).map(personLabel).join(', ')
-                  : 'No phone numbers on selected agencies'}
-              </span>
-            </div>
-
-            <div className="rounded-2xl bg-[#efeae2] p-3 border border-border">
-              <div className="rounded-xl bg-white p-3 shadow-2xs max-w-sm text-xs font-sans text-text-primary whitespace-pre-wrap leading-relaxed border border-border/40">
-                {previewData?.whatsapp?.text || 'No WhatsApp text draft.'}
-                <div className="mt-1 text-right text-[10px] text-text-muted">
-                  Just now
-                </div>
+          <div className="flex-1 flex flex-col rounded-2xl bg-[#efeae2] p-4 border border-border shadow-2xs min-h-[440px] overflow-y-auto">
+            <div className="rounded-2xl bg-white p-4 shadow-sm max-w-lg text-[15px] font-sans text-text-primary whitespace-pre-wrap leading-relaxed border border-border/40">
+              {previewData?.whatsapp?.text || 'No WhatsApp text draft available.'}
+              <div className="mt-2 text-right text-[11px] text-text-muted">
+                Just now
               </div>
             </div>
           </div>
@@ -600,7 +603,7 @@ export default function ProjectRemindersPage({
     );
   };
 
-  // Render 32px Action Icon Buttons
+  // Render Equal-Width Action Buttons (Line 3 of card)
   const renderActionButtons = (
     cat: ReminderCategory,
     isFocused: boolean,
@@ -608,54 +611,55 @@ export default function ProjectRemindersPage({
     isSendingThisCat: boolean
   ) => {
     return (
-      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-        {/* Preview Button (32px) */}
+      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        {/* Preview Button */}
         <button
           type="button"
-          title={`Preview ${cat.label}`}
-          aria-label={`Preview ${cat.label}`}
           onClick={() => {
             setFocusedCategoryKey(cat.key);
             setShowMobilePreview(true);
           }}
-          className={`h-8 w-8 rounded-lg border flex items-center justify-center transition-colors ${
+          className={`h-8 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors min-w-[84px] ${
             isFocused
               ? 'border-accent bg-accent/15 text-accent shadow-xs'
               : 'border-border bg-surface text-text-secondary hover:bg-surface-alt hover:text-text-primary'
           }`}
         >
-          <EyeIcon className="h-4 w-4" />
+          <EyeIcon />
+          <span>Preview</span>
         </button>
 
-        {/* WhatsApp Button (32px) */}
+        {/* WhatsApp Button */}
         <button
           type="button"
-          title={`Send WhatsApp reminder for ${cat.label}`}
-          aria-label={`Send WhatsApp reminder for ${cat.label}`}
           disabled={!hasPending || isSendingThisCat}
           onClick={() => handleSendReminder(cat, 'whatsapp')}
-          className="h-8 w-8 rounded-lg border border-border bg-surface flex items-center justify-center text-[#25D366] hover:bg-surface-alt transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs"
+          className="h-8 px-3 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs min-w-[84px]"
         >
           {isSendingThisCat && sendingState?.channel === 'whatsapp' ? (
             <span className="h-3.5 w-3.5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
           ) : (
-            <WhatsAppIcon className="h-4 w-4" />
+            <>
+              <WhatsAppIcon />
+              <span>WhatsApp</span>
+            </>
           )}
         </button>
 
-        {/* Email Button (32px) */}
+        {/* Email Button */}
         <button
           type="button"
-          title={`Send Email reminder for ${cat.label}`}
-          aria-label={`Send Email reminder for ${cat.label}`}
           disabled={!hasPending || isSendingThisCat}
           onClick={() => handleSendReminder(cat, 'email')}
-          className="h-8 w-8 rounded-lg border border-border bg-surface flex items-center justify-center text-accent hover:bg-surface-alt transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs"
+          className="h-8 px-3 rounded-lg border border-accent/40 bg-accent/10 text-accent hover:bg-accent/20 flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs min-w-[84px]"
         >
           {isSendingThisCat && sendingState?.channel === 'email' ? (
             <span className="h-3.5 w-3.5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           ) : (
-            <MailIcon className="h-4 w-4" />
+            <>
+              <MailIcon />
+              <span>Email</span>
+            </>
           )}
         </button>
       </div>
@@ -663,7 +667,7 @@ export default function ProjectRemindersPage({
   };
 
   return (
-    <div className="min-h-dvh bg-surface-alt pb-16">
+    <div className="min-h-dvh bg-surface-alt pb-24">
       <AppHeader />
 
       <main className="mx-auto max-w-7xl px-4 sm:px-6 pt-5">
@@ -694,13 +698,13 @@ export default function ProjectRemindersPage({
           <div className="flex items-center gap-2">
             <Link
               href={`/projects/${projectId}`}
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-alt transition-colors"
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-secondary hover:bg-surface-alt transition-colors"
             >
               Project Details
             </Link>
             <Link
               href={`/hub?p=${projectId}`}
-              className="rounded-lg bg-accent px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors"
+              className="rounded-lg bg-accent px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-accent-hover transition-colors"
             >
               Open Dashboard
             </Link>
@@ -740,7 +744,7 @@ export default function ProjectRemindersPage({
                     className="rounded-xl border border-border bg-surface overflow-hidden shadow-2xs"
                   >
                     {/* Box Header */}
-                    <div className="border-b border-border/70 px-4 py-2.5 bg-surface-alt/60 flex items-center justify-between">
+                    <div className="border-b border-border/70 px-4 py-3 bg-surface-alt/60 flex items-center justify-between">
                       <div>
                         <h2 className="text-xs font-bold uppercase tracking-wider text-text-primary">
                           {sec.title}
@@ -750,7 +754,7 @@ export default function ProjectRemindersPage({
                         </p>
                       </div>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
                           totalPending > 0
                             ? 'bg-amber-100 text-amber-800 border border-amber-200'
                             : 'bg-surface-alt text-text-muted border border-border'
@@ -760,8 +764,8 @@ export default function ProjectRemindersPage({
                       </span>
                     </div>
 
-                    {/* Box Category Lines (~48px each, thin dividers) */}
-                    <div className="divide-y divide-border/60">
+                    {/* Categories List (Same card design for All dependencies, VTECH dependencies, Other agency) */}
+                    <div className="p-3.5 space-y-3.5">
                       {sec.categories.map((cat) => {
                         const isFocused = focusedCategoryKey === cat.key;
                         const chipStyle = CATEGORY_CHIP_COLORS[cat.key] ?? CATEGORY_CHIP_COLORS.all;
@@ -773,40 +777,125 @@ export default function ProjectRemindersPage({
                           );
                         const isSendingThisCat = sendingState?.key === cat.key;
 
-                        if (cat.key === 'all') {
-                          return (
-                            <div
-                              key={cat.key}
-                              onClick={() => setFocusedCategoryKey(cat.key)}
-                              className={`p-3.5 transition-colors cursor-pointer flex flex-col gap-3 ${
-                                isFocused
-                                  ? 'bg-accent/5 ring-1 ring-inset ring-accent/30'
-                                  : 'hover:bg-surface-alt/40'
-                              }`}
-                            >
-                              {/* Label + count on its own line */}
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${chipStyle.bg} ${chipStyle.text} ${chipStyle.border}`}
-                                  >
-                                    {cat.label}
+                        const isAllCat = cat.key === 'all';
+                        const externalRecipients = isAllCat
+                          ? cat.recipients.filter((rg) => !rg.name.toLowerCase().includes('vtech'))
+                          : [];
+                        const vtechRecipients = isAllCat
+                          ? cat.recipients.filter((rg) => rg.name.toLowerCase().includes('vtech'))
+                          : [];
+
+                        return (
+                          <div
+                            key={cat.key}
+                            onClick={() => setFocusedCategoryKey(cat.key)}
+                            className={`rounded-xl border p-4 transition-all cursor-pointer flex flex-col gap-3.5 shadow-2xs ${
+                              isFocused
+                                ? 'border-accent bg-accent/5 ring-1 ring-accent'
+                                : 'border-border/80 bg-surface hover:bg-surface-alt/40'
+                            }`}
+                          >
+                            {/* Line 1: Category label + pending chip */}
+                            <div className="flex items-center justify-between gap-2">
+                              <span
+                                className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-bold ${chipStyle.bg} ${chipStyle.text} ${chipStyle.border}`}
+                              >
+                                {cat.label}
+                              </span>
+                              <span
+                                className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                                  cat.itemCount > 0
+                                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                    : 'bg-surface-alt text-text-muted border border-border'
+                                }`}
+                              >
+                                {cat.itemCount} pending
+                              </span>
+                            </div>
+
+                            {/* Line 2: Checkboxes */}
+                            {isAllCat ? (
+                              /* All dependencies: two sub-groups side by side: left = external, right = VTech */
+                              <div
+                                className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg bg-surface-alt/50 border border-border/60"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {/* Left Sub-group: External */}
+                                <div className="space-y-1.5">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block border-b border-border/40 pb-1">
+                                    External
                                   </span>
-                                  <span
-                                    className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                                      cat.itemCount > 0
-                                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                        : 'bg-surface-alt text-text-muted border border-border'
-                                    }`}
-                                  >
-                                    {cat.itemCount} pending
+                                  <div className="space-y-1.5 pt-0.5">
+                                    {externalRecipients.map((rg) => {
+                                      const isChecked = catSelectedRecipients.has(rg.agencyTypeId);
+                                      const hasAgencies = rg.agencies.length > 0;
+                                      const displayName = formatRecipientName(rg.name, cat.section);
+                                      return (
+                                        <label
+                                          key={rg.agencyTypeId}
+                                          title={!hasAgencies ? `${rg.name} (not added to project)` : rg.name}
+                                          className={`flex items-center gap-2 text-xs select-none transition-opacity ${
+                                            !hasAgencies
+                                              ? 'opacity-40 cursor-not-allowed text-text-muted'
+                                              : 'cursor-pointer text-text-secondary hover:text-text-primary'
+                                          }`}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            disabled={!hasAgencies}
+                                            checked={isChecked}
+                                            onChange={() => toggleRecipient(cat.key, rg.agencyTypeId)}
+                                            className="h-3.5 w-3.5 rounded border-border text-accent focus:ring-accent disabled:cursor-not-allowed shrink-0"
+                                          />
+                                          <span className={`truncate ${isChecked ? 'font-semibold text-text-primary' : ''}`}>
+                                            {displayName}
+                                          </span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
+                                {/* Right Sub-group: VTech */}
+                                <div className="space-y-1.5">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block border-b border-border/40 pb-1">
+                                    VTech
                                   </span>
+                                  <div className="space-y-1.5 pt-0.5">
+                                    {vtechRecipients.map((rg) => {
+                                      const isChecked = catSelectedRecipients.has(rg.agencyTypeId);
+                                      const hasAgencies = rg.agencies.length > 0;
+                                      const displayName = formatRecipientName(rg.name, cat.section);
+                                      return (
+                                        <label
+                                          key={rg.agencyTypeId}
+                                          title={!hasAgencies ? `${rg.name} (not added to project)` : rg.name}
+                                          className={`flex items-center gap-2 text-xs select-none transition-opacity ${
+                                            !hasAgencies
+                                              ? 'opacity-40 cursor-not-allowed text-text-muted'
+                                              : 'cursor-pointer text-text-secondary hover:text-text-primary'
+                                          }`}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            disabled={!hasAgencies}
+                                            checked={isChecked}
+                                            onChange={() => toggleRecipient(cat.key, rg.agencyTypeId)}
+                                            className="h-3.5 w-3.5 rounded border-border text-accent focus:ring-accent disabled:cursor-not-allowed shrink-0"
+                                          />
+                                          <span className={`truncate ${isChecked ? 'font-semibold text-text-primary' : ''}`}>
+                                            {displayName}
+                                          </span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
                               </div>
-
-                              {/* Groups on multiple lines (2 columns of checkboxes) */}
+                            ) : (
+                              /* VTech & Other categories: CSS grid, 2 columns, aligned */
                               <div
-                                className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-2"
+                                className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-2 p-3 rounded-lg bg-surface-alt/50 border border-border/60"
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 {cat.recipients.map((rg) => {
@@ -816,12 +905,8 @@ export default function ProjectRemindersPage({
                                   return (
                                     <label
                                       key={rg.agencyTypeId}
-                                      title={
-                                        !hasAgencies
-                                          ? `${rg.name} (not added to project)`
-                                          : rg.name
-                                      }
-                                      className={`inline-flex items-center gap-1.5 text-xs select-none transition-opacity ${
+                                      title={!hasAgencies ? `${rg.name} (not added to project)` : rg.name}
+                                      className={`flex items-center gap-2 text-xs select-none transition-opacity ${
                                         !hasAgencies
                                           ? 'opacity-40 cursor-not-allowed text-text-muted'
                                           : 'cursor-pointer text-text-secondary hover:text-text-primary'
@@ -841,93 +926,10 @@ export default function ProjectRemindersPage({
                                   );
                                 })}
                               </div>
+                            )}
 
-                              {/* Buttons on their own line */}
-                              <div className="pt-2 border-t border-border/40 flex items-center justify-end gap-1.5">
-                                {renderActionButtons(cat, isFocused, hasPending, isSendingThisCat)}
-                              </div>
-                            </div>
-                          );
-                        }
-
-                        return (
-                          <div
-                            key={cat.key}
-                            onClick={() => setFocusedCategoryKey(cat.key)}
-                            className={`px-3.5 py-2.5 transition-colors cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 min-h-[48px] ${
-                              isFocused
-                                ? 'bg-accent/5 ring-1 ring-inset ring-accent/30'
-                                : 'hover:bg-surface-alt/40'
-                            }`}
-                          >
-                            {/* Left area: Label + Count + Checkboxes */}
-                            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                              {/* Row 1 on mobile: Label + Count + Action Buttons */}
-                              <div className="flex items-center justify-between sm:justify-start gap-2">
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <span
-                                    className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${chipStyle.bg} ${chipStyle.text} ${chipStyle.border}`}
-                                  >
-                                    {cat.label}
-                                  </span>
-                                  <span
-                                    className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                                      cat.itemCount > 0
-                                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                        : 'bg-surface-alt text-text-muted border border-border'
-                                    }`}
-                                  >
-                                    {cat.itemCount} pending
-                                  </span>
-                                </div>
-
-                                {/* On phone: action buttons right next to the label */}
-                                <div className="flex sm:hidden items-center gap-1 shrink-0">
-                                  {renderActionButtons(cat, isFocused, hasPending, isSendingThisCat)}
-                                </div>
-                              </div>
-
-                              {/* Checkbox group */}
-                              <div
-                                className="flex flex-wrap items-center gap-x-3 gap-y-1.5"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {cat.recipients.map((rg) => {
-                                  const isChecked = catSelectedRecipients.has(rg.agencyTypeId);
-                                  const hasAgencies = rg.agencies.length > 0;
-                                  const displayName = formatRecipientName(rg.name, cat.section);
-                                  return (
-                                    <label
-                                      key={rg.agencyTypeId}
-                                      title={
-                                        !hasAgencies
-                                          ? `${rg.name} (not added to project)`
-                                          : rg.name
-                                      }
-                                      className={`inline-flex items-center gap-1.5 text-xs select-none transition-opacity ${
-                                        !hasAgencies
-                                          ? 'opacity-40 cursor-not-allowed text-text-muted'
-                                          : 'cursor-pointer text-text-secondary hover:text-text-primary'
-                                      }`}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        disabled={!hasAgencies}
-                                        checked={isChecked}
-                                        onChange={() => toggleRecipient(cat.key, rg.agencyTypeId)}
-                                        className="h-3.5 w-3.5 rounded border-border text-accent focus:ring-accent disabled:cursor-not-allowed"
-                                      />
-                                      <span className={isChecked ? 'font-semibold text-text-primary' : ''}>
-                                        {displayName}
-                                      </span>
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                            </div>
-
-                            {/* On desktop: action buttons at right */}
-                            <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+                            {/* Line 3: Action buttons right-aligned, equal size */}
+                            <div className="pt-2.5 border-t border-border/50 flex items-center justify-end">
                               {renderActionButtons(cat, isFocused, hasPending, isSendingThisCat)}
                             </div>
                           </div>
@@ -939,10 +941,10 @@ export default function ProjectRemindersPage({
               })}
             </div>
 
-            {/* ────────────────────── RIGHT COLUMN (60%): STICKY PREVIEW (DESKTOP) ────────────────────── */}
-            <div className="hidden lg:block lg:col-span-3 sticky top-6 space-y-4">
-              <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm space-y-3">
-                <div className="flex items-center justify-between border-b border-border/70 pb-3">
+            {/* ────────────────────── RIGHT COLUMN (60%): DRAFT PANEL (DESKTOP) ────────────────────── */}
+            <div className="hidden lg:block lg:col-span-3 sticky top-6">
+              <div className="rounded-xl border border-border bg-surface p-5 shadow-2xs min-h-[520px] flex flex-col space-y-4">
+                <div className="flex items-center justify-between border-b border-border pb-3">
                   <div>
                     <h3 className="text-sm font-bold text-text-primary">
                       Draft Preview
@@ -952,29 +954,29 @@ export default function ProjectRemindersPage({
                     </p>
                   </div>
 
-                  {/* Channel Tabs: WhatsApp | Email */}
-                  <div className="flex rounded-lg bg-surface-alt p-0.5 border border-border">
-                    <button
-                      type="button"
-                      onClick={() => setPreviewTab('whatsapp')}
-                      className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
-                        previewTab === 'whatsapp'
-                          ? 'bg-surface text-text-primary shadow-2xs'
-                          : 'text-text-muted hover:text-text-primary'
-                      }`}
-                    >
-                      WhatsApp
-                    </button>
+                  {/* Channel Tabs: Email | WhatsApp */}
+                  <div className="flex rounded-lg bg-surface-alt p-1 border border-border">
                     <button
                       type="button"
                       onClick={() => setPreviewTab('email')}
-                      className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
+                      className={`rounded-md px-3 py-1 text-xs font-bold transition-colors ${
                         previewTab === 'email'
                           ? 'bg-surface text-text-primary shadow-2xs'
                           : 'text-text-muted hover:text-text-primary'
                       }`}
                     >
                       Email
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTab('whatsapp')}
+                      className={`rounded-md px-3 py-1 text-xs font-bold transition-colors ${
+                        previewTab === 'whatsapp'
+                          ? 'bg-surface text-text-primary shadow-2xs'
+                          : 'text-text-muted hover:text-text-primary'
+                      }`}
+                    >
+                      WhatsApp
                     </button>
                   </div>
                 </div>
@@ -1006,17 +1008,6 @@ export default function ProjectRemindersPage({
                   <div className="flex rounded-lg bg-surface-alt p-0.5 border border-border">
                     <button
                       type="button"
-                      onClick={() => setPreviewTab('whatsapp')}
-                      className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
-                        previewTab === 'whatsapp'
-                          ? 'bg-surface text-text-primary shadow-2xs'
-                          : 'text-text-muted hover:text-text-primary'
-                      }`}
-                    >
-                      WA
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => setPreviewTab('email')}
                       className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
                         previewTab === 'email'
@@ -1025,6 +1016,17 @@ export default function ProjectRemindersPage({
                       }`}
                     >
                       Email
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTab('whatsapp')}
+                      className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
+                        previewTab === 'whatsapp'
+                          ? 'bg-surface text-text-primary shadow-2xs'
+                          : 'text-text-muted hover:text-text-primary'
+                      }`}
+                    >
+                      WA
                     </button>
                   </div>
                   <button
@@ -1047,48 +1049,65 @@ export default function ProjectRemindersPage({
           </div>
         )}
 
-        {/* Floating Mobile Preview Pill */}
-        <div className="fixed bottom-4 right-4 z-40 lg:hidden">
-          <button
-            type="button"
-            onClick={() => setShowMobilePreview(true)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2.5 text-xs font-bold text-white shadow-lg hover:bg-accent-hover transition-transform active:scale-95"
-          >
-            <EyeIcon className="h-4 w-4" />
-            <span>Preview ({focusedCategory?.label ?? 'Draft'})</span>
-          </button>
-        </div>
-
-        {/* ── Confirmation Modal for WhatsApp Dispatches ("I've sent it") ── */}
-        {confirmDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-            <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-2xl">
-              <h2 className="text-base font-bold text-text-primary mb-2">
-                Sent Confirmation
-              </h2>
-              <p className="text-xs text-text-secondary mb-4 leading-relaxed">
-                WhatsApp was opened in your browser with the draft message. Once you tap Send on WhatsApp, click below to mark this dispatch as sent and advance reminder counters.
-              </p>
-
-              <div className="mb-4 space-y-1.5">
-                {confirmDialog.links.map((link, idx) => (
+        {/* Modal: Links for Popup Blocker Fallback */}
+        {popupLinksModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-2xl space-y-4">
+              <h3 className="text-sm font-bold text-text-primary">{popupLinksModal.title}</h3>
+              <div className="space-y-2">
+                {popupLinksModal.links.map((link, idx) => (
                   <a
                     key={idx}
                     href={link.url}
                     target="_blank"
-                    rel="noreferrer"
-                    className="block rounded-lg border border-border bg-surface-alt px-3 py-2 text-xs font-medium text-accent hover:underline truncate"
+                    rel="noopener noreferrer"
+                    className="block rounded-lg bg-surface-alt p-3 text-xs font-semibold text-accent hover:underline border border-border"
                   >
-                    Re-open {link.label}
+                    {link.label} ↗
                   </a>
                 ))}
               </div>
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPopupLinksModal(null)}
+                  className="rounded-lg border border-border px-4 py-1.5 text-xs font-semibold hover:bg-surface-alt"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
+        {/* Modal: Confirmation for Manual Dispatches */}
+        {confirmDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-2xl space-y-4">
+              <h3 className="text-sm font-bold text-text-primary">Confirm Reminder Dispatches</h3>
+              <p className="text-xs text-text-secondary">
+                Did you send the drafted messages in the opened WhatsApp / Gmail tabs?
+              </p>
+              <div className="space-y-1.5">
+                {confirmDialog.links.map((link, idx) => (
+                  <div key={idx} className="flex items-center justify-between rounded-lg bg-surface-alt p-2 text-xs">
+                    <span className="font-semibold text-text-primary">{link.label}</span>
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent font-bold hover:underline"
+                    >
+                      Reopen tab ↗
+                    </a>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
                 <button
                   type="button"
                   onClick={() => setConfirmDialog(null)}
-                  className="rounded-lg border border-border px-3.5 py-2 text-xs font-medium text-text-secondary hover:bg-surface-alt"
+                  className="rounded-lg border border-border px-3.5 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-alt"
                 >
                   Cancel
                 </button>
@@ -1096,48 +1115,9 @@ export default function ProjectRemindersPage({
                   type="button"
                   disabled={confirming}
                   onClick={() => handleConfirmSend(confirmDialog.dispatchIds)}
-                  className="rounded-lg bg-success px-4 py-2 text-xs font-bold text-white shadow-sm hover:opacity-90 transition-opacity"
+                  className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
                 >
-                  {confirming ? 'Saving…' : "I Have Sent It"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Modal for Popup-Blocked Links ── */}
-        {popupLinksModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-            <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-2xl">
-              <h2 className="text-base font-bold text-text-primary mb-2">
-                {popupLinksModal.title}
-              </h2>
-              <p className="text-xs text-text-secondary mb-4 leading-relaxed">
-                Your browser blocked opening multiple popups automatically. Click each link below to launch your messaging apps:
-              </p>
-
-              <div className="mb-4 space-y-2">
-                {popupLinksModal.links.map((link, idx) => (
-                  <a
-                    key={idx}
-                    href={link.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center justify-between rounded-lg border border-border bg-surface-alt px-3 py-2.5 text-xs font-semibold text-accent hover:bg-accent/10 transition-colors"
-                  >
-                    <span>{link.label}</span>
-                    <span>Launch -&gt;</span>
-                  </a>
-                ))}
-              </div>
-
-              <div className="flex justify-end pt-2 border-t border-border">
-                <button
-                  type="button"
-                  onClick={() => setPopupLinksModal(null)}
-                  className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-white"
-                >
-                  Done
+                  {confirming ? 'Saving…' : "I've Sent It"}
                 </button>
               </div>
             </div>
