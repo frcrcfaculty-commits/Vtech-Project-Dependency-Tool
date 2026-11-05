@@ -52,7 +52,7 @@ export function AddDependencyFab() {
 
   useEscape(() => setOpen(false), saving);
 
-  const hidden = pathname.startsWith('/login');
+  const hidden = pathname.startsWith('/login') || pathname === '/projects';
 
   const openModal = useCallback(async () => {
     setOpen(true); setError(null);
