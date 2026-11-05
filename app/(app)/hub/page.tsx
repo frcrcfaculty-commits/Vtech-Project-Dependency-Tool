@@ -973,7 +973,8 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
                 >
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
-              ) : isStuck ? (
+              ) : (
+                // ✗ on every step that is not done (VTech, 2026-11-05)
                 <svg
                   viewBox="0 0 24 24"
                   width="10"
@@ -988,7 +989,7 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
                 >
                   <path d="M18 6 6 18M6 6l12 12" />
                 </svg>
-              ) : null}
+              )}
             </button>
           );
         })}

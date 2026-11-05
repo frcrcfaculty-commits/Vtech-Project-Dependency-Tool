@@ -24,7 +24,8 @@ export function SendReminderFab() {
   useEscape(() => setPickerOpen(false), false);
 
   // Hidden on login and on any Reminders page itself
-  const hidden = pathname.startsWith('/login') || pathname.includes('/reminders');
+  // hidden on the BOQ manager page (/projects): its tables run under the floating buttons
+  const hidden = pathname.startsWith('/login') || pathname.includes('/reminders') || pathname === '/projects';
 
   // Detect project in current context
   const currentProjectId =
