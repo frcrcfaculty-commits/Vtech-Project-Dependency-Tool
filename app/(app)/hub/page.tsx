@@ -911,17 +911,17 @@ function Dashboard() {
 }
 
 /** Segmented colour bar: one segment per step, coloured by sheet_colour.
- * Every line always shows exactly one ✗ = the step being worked on now:
- * the first step (sheet order) that is open and not Done/N.A.
- * When marked Done, the ✗ moves to the next open step automatically. Done steps show ✓.
- * Locked/untouched steps show no mark.
+ * Every pending step shows ✗ (not only one).
+ * Done/N.A. steps show ✓.
+ * Open-but-not-pending and locked steps show no mark.
+ * The "being worked on" step keeps its dark outline.
  */
 function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: GateRow) => void }) {
   const ordered = [...steps].sort((a, b) => a.seq - b.seq);
   if (ordered.length === 0) return null;
 
   const doneCount = ordered.filter((r) => isDone(r.status)).length;
-  // The first step (sheet order) that is open and not Done/N.A.
+  // The first step (sheet order) that is open and not Done/N.A. (being worked on)
   const currentStep = ordered.find((r) => !isDone(r.status) && !r.locked);
 
   return (
@@ -952,10 +952,10 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
               }`}
               style={{
                 backgroundColor: done || isStuck || isCurrent ? c.bg : locked ? c.bg : 'transparent',
-                borderColor: isStuck ? '#0f172a' : isCurrent ? '#0f172a' : done ? c.ring : locked ? 'transparent' : c.ring,
-                borderWidth: isStuck || isCurrent ? '2px' : done ? '1px' : locked ? '0px' : '2px',
+                borderColor: isCurrent ? '#0f172a' : isStuck ? c.ring : done ? c.ring : locked ? 'transparent' : c.ring,
+                borderWidth: isCurrent ? '2px' : done ? '1px' : locked ? '0px' : '2px',
                 borderStyle: 'solid',
-                boxShadow: isStuck ? '0 0 0 1px #0f172a' : undefined,
+                boxShadow: isCurrent ? '0 0 0 1px #0f172a' : undefined,
               }}
             >
               {done ? (
@@ -973,7 +973,7 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
                 >
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
-              ) : isCurrent ? (
+              ) : isStuck ? (
                 <svg
                   viewBox="0 0 24 24"
                   width="10"

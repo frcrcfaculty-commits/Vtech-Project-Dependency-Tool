@@ -132,7 +132,7 @@ interface DraftMessage {
   subject: string;
 }
 
-type SortColumn = 'default' | 'project' | 'room' | 'product' | 'agency' | 'date';
+type SortColumn = 'default' | 'project' | 'room' | 'product' | 'agency';
 type SortDirection = 'asc' | 'desc';
 
 export default function PendingPage() {
@@ -164,7 +164,6 @@ export default function PendingPage() {
   const [projectSearch, setProjectSearch] = useState('');
   const [agencySearch, setAgencySearch] = useState('');
 
-  const [ageFilter, setAgeFilter] = useState<'all' | '7' | '14' | '30'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Export dropdown
@@ -360,15 +359,6 @@ export default function PendingPage() {
         }
       }
 
-      // Age filter
-      if (ageFilter !== 'all') {
-        if (!item.first_raised_on) return false;
-        const raisedDate = new Date(item.first_raised_on).getTime();
-        const daysOpen = Math.floor((now - raisedDate) / (1000 * 60 * 60 * 24));
-        const minDays = parseInt(ageFilter, 10);
-        if (daysOpen < minDays) return false;
-      }
-
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -394,7 +384,7 @@ export default function PendingPage() {
 
       return true;
     });
-  }, [items, getItemLane, activeLane, selectedProjectIds, selectedAgencyIds, ageFilter, searchQuery]);
+  }, [items, getItemLane, activeLane, selectedProjectIds, selectedAgencyIds, searchQuery]);
 
   // Sorted items
   const sortedItems = useMemo(() => {
@@ -445,12 +435,6 @@ export default function PendingPage() {
           const agA = formatAgencyLabel(a);
           const agB = formatAgencyLabel(b);
           cmp = agA.localeCompare(agB);
-          break;
-        }
-        case 'date': {
-          const dA = a.first_raised_on ?? '';
-          const dB = b.first_raised_on ?? '';
-          cmp = dA.localeCompare(dB);
           break;
         }
       }
@@ -1165,7 +1149,7 @@ export default function PendingPage() {
         <div className="rounded-xl border border-border bg-surface p-3.5 shadow-xs space-y-3">
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-12">
             {/* Search */}
-            <div className="lg:col-span-4">
+            <div className="lg:col-span-6">
               <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
                 Search
               </label>
@@ -1341,29 +1325,6 @@ export default function PendingPage() {
                 </div>
               )}
             </div>
-
-            {/* Age Filter */}
-            <div className="lg:col-span-2">
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
-                Pending since
-              </label>
-              <div className="flex items-center gap-1">
-                {(['all', '7', '14', '30'] as const).map((age) => (
-                  <button
-                    key={age}
-                    type="button"
-                    onClick={() => setAgeFilter(age)}
-                    className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors ${
-                      ageFilter === age
-                        ? 'bg-text-primary text-surface'
-                        : 'bg-surface-alt text-text-secondary hover:bg-border'
-                    }`}
-                  >
-                    {age === 'all' ? 'All' : `>${age}d`}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
 
           {/* Action Row: Send Reminders (WhatsApp / Email) + Selection Stats */}
@@ -1444,7 +1405,6 @@ export default function PendingPage() {
                 onClick={() => {
                   setSelectedProjectIds([]);
                   setSelectedAgencyIds([]);
-                  setAgeFilter('all');
                   setSearchQuery('');
                 }}
                 className="mt-3 inline-flex items-center rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-text-primary hover:bg-surface-alt"
@@ -1523,18 +1483,7 @@ export default function PendingPage() {
                       </div>
                     </th>
 
-                    {/* 8. Pending Since */}
-                    <th
-                      className="p-3 cursor-pointer hover:text-text-primary whitespace-nowrap min-w-[110px]"
-                      onClick={() => handleSort('date')}
-                    >
-                      <div className="flex items-center gap-1">
-                        <span>Pending since</span>
-                        {sortColumn === 'date' && <span>{sortDirection === 'asc' ? '▲' : '▼'}</span>}
-                      </div>
-                    </th>
-
-                    {/* 9. Action Plan */}
+                    {/* 8. Action Plan */}
                     <th className="p-3 whitespace-nowrap min-w-[220px]">Action plan</th>
                   </tr>
                 </thead>
@@ -1651,14 +1600,7 @@ export default function PendingPage() {
                           </span>
                         </td>
 
-                        {/* 8. Pending Since */}
-                        <td className="p-3 align-top pt-3.5 whitespace-nowrap">
-                          <div className="text-xs text-text-primary font-medium">
-                            {formatPendingDate(item.first_raised_on)}
-                          </div>
-                        </td>
-
-                        {/* 9. Action Plan (Inline Editable, Requirement 14) */}
+                        {/* 8. Action Plan (Inline Editable, Requirement 14) */}
                         <td className="p-3 align-top pt-3">
                           <ActionPlanCell
                             itemId={item.id}

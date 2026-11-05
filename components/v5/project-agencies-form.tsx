@@ -597,7 +597,7 @@ export function ProjectAgenciesForm({
         <div className="border-b border-border pb-2">
           <h3 className="text-base font-bold text-text-primary">VTech Team</h3>
           <p className="text-xs text-text-secondary mt-0.5">
-            Internal VTech execution teams (Sales Team, Installers, Programmers). Add team members who manage or deliver this project.
+            Internal VTech execution teams (PM, Installers, Programmers). Add team members who manage or deliver this project.
           </p>
         </div>
 
