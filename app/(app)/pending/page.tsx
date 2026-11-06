@@ -9,6 +9,7 @@ import { compressImageToWebP } from '@/lib/client/image';
 import { todayIST } from '@/lib/client/date';
 import { downloadCsv } from '@/lib/client/csv';
 import { AppHeader } from '@/components/app-header';
+import { formatBlockedBy } from '@/lib/client/steps';
 
 export interface PendingItem {
   id: string;
@@ -28,6 +29,8 @@ export interface PendingItem {
   action_plan: string | null;
   action_plan_updated_at: string | null;
   action_plan_updated_by: string | null;
+  responsible?: string | null;
+  via_reason?: boolean;
   updated_at: string;
   waits_on_client?: boolean;
   projects: {
@@ -100,13 +103,9 @@ export function formatPendingItemTitle(item: PendingItem): string {
 }
 
 export function formatAgencyLabel(item: PendingItem): string {
-  // The assigned agency's type wins; the step's default type is only the fallback for unassigned items.
-  const typeName = item.agencies?.agency_types?.name ?? item.project_dependencies?.agency_types?.name;
-  const comp = item.agencies?.company_name;
-  const vtech: Record<string, string> = { 'VTech Installers': 'Installer', 'VTech Programmers': 'Programmer', 'VTECH PM': 'PM', 'VTECH Sales Team': 'PM' };
-  if (typeName && vtech[typeName]) return `${vtech[typeName]} – VTech`;
-  if (!comp) return typeName ? `${typeName} – unassigned` : 'Unassigned';
-  return typeName && !comp.toLowerCase().includes(typeName.toLowerCase()) ? `${typeName} – ${comp}` : comp;
+  // Use item_responsible.responsible if available (handles stuck reasons e.g. "Sales Clearance awaited" -> VTECH Sales), else agency type
+  const responsible = item.responsible || item.agencies?.agency_types?.name || item.project_dependencies?.agency_types?.name;
+  return formatBlockedBy(responsible, item.agencies?.company_name);
 }
 
 interface AgencyContact {
@@ -217,7 +216,7 @@ export default function PendingPage() {
       setError(null);
       const sb = supabaseBrowser();
 
-      const [itemsRes, contactsRes, gateRes] = await Promise.all([
+      const [itemsRes, contactsRes, gateRes, irRes] = await Promise.all([
         sb
           .from('dependency_items')
           .select(
@@ -236,6 +235,7 @@ export default function PendingPage() {
           .eq('active', true)
           .order('level', { ascending: true }),
         sb.from('item_gate').select('item_id, waits_on_client'),
+        sb.from('item_responsible').select('item_id, responsible, via_reason'),
       ]);
 
       if (itemsRes.error) throw itemsRes.error;
@@ -246,6 +246,11 @@ export default function PendingPage() {
           .filter((g: { waits_on_client: boolean }) => g.waits_on_client)
           .map((g: { item_id: string }) => g.item_id)
       );
+
+      const irMap = new Map<string, { responsible: string; via_reason: boolean }>();
+      for (const ir of ((irRes.data ?? []) as { item_id: string; responsible: string; via_reason: boolean }[])) {
+        if (ir.item_id) irMap.set(ir.item_id, ir);
+      }
 
       type Raw = Omit<PendingItem, 'projects'> & {
         rooms: (PendingItem['rooms'] & { floors: { id: string; label: string; sort: number; projects: PendingItem['projects'] } | null }) | null;
@@ -259,8 +264,12 @@ export default function PendingPage() {
           r.product_steps?.responsibility === 'client' ||
           r.responsibility === 'client';
 
+        const ir = irMap.get(r.id);
+
         return {
           ...r,
+          responsible: ir?.responsible ?? null,
+          via_reason: ir?.via_reason ?? false,
           waits_on_client: isClient,
           projects: r.rooms?.floors?.projects ?? null,
         };
@@ -764,7 +773,7 @@ export default function PendingPage() {
       'Product',
       'Location',
       'What Pending',
-      'Agency',
+      'Blocked by',
       'First Raised On',
       'Days Open',
       'Reminders Sent',
@@ -1244,10 +1253,10 @@ export default function PendingPage() {
               )}
             </div>
 
-            {/* Agency Multi-Select Dropdown */}
+            {/* Blocked by Multi-Select Dropdown */}
             <div className="lg:col-span-3 relative" data-dropdown>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
-                Agency ({selectedAgencyIds.length === 0 ? 'All' : `${selectedAgencyIds.length} selected`})
+                Blocked by ({selectedAgencyIds.length === 0 ? 'All' : `${selectedAgencyIds.length} selected`})
               </label>
               <button
                 type="button"
@@ -1259,10 +1268,10 @@ export default function PendingPage() {
               >
                 <span className="truncate">
                   {selectedAgencyIds.length === 0
-                    ? 'All Agencies'
+                    ? 'All Blocked by'
                     : selectedAgencyIds.length === 1
-                    ? filterOptions.agencies.find((a) => a.id === selectedAgencyIds[0])?.name ?? '1 Agency'
-                    : `${selectedAgencyIds.length} Agencies selected`}
+                    ? filterOptions.agencies.find((a) => a.id === selectedAgencyIds[0])?.name ?? '1 Blocked by'
+                    : `${selectedAgencyIds.length} Blocked by selected`}
                 </span>
                 <svg className="h-3 w-3 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -1273,7 +1282,7 @@ export default function PendingPage() {
                 <div className="absolute left-0 mt-1 w-72 rounded-xl border border-border bg-surface p-2 shadow-xl z-50 space-y-1.5 text-xs">
                   <input
                     type="text"
-                    placeholder="Search agency…"
+                    placeholder="Search blocked by…"
                     value={agencySearch}
                     onChange={(e) => setAgencySearch(e.target.value)}
                     className="w-full rounded-lg border border-border bg-surface-alt px-2.5 py-1 text-xs focus:border-accent focus:outline-none"
@@ -1472,13 +1481,13 @@ export default function PendingPage() {
                     {/* 6. What Pending */}
                     <th className="p-3 whitespace-nowrap min-w-[200px]">What pending</th>
 
-                    {/* 7. Agency */}
+                    {/* 7. Blocked by */}
                     <th
                       className="p-3 cursor-pointer hover:text-text-primary whitespace-nowrap min-w-[150px]"
                       onClick={() => handleSort('agency')}
                     >
                       <div className="flex items-center gap-1">
-                        <span>Agency</span>
+                        <span>Blocked by</span>
                         {sortColumn === 'agency' && <span>{sortDirection === 'asc' ? '▲' : '▼'}</span>}
                       </div>
                     </th>
@@ -1593,7 +1602,7 @@ export default function PendingPage() {
                           </div>
                         </td>
 
-                        {/* 7. Agency */}
+                        {/* 7. Blocked by */}
                         <td className="p-3 align-top pt-3.5">
                           <span className="inline-block rounded-md bg-surface-alt px-2 py-0.5 text-xs font-semibold text-text-primary border border-border/60">
                             {agencyText}

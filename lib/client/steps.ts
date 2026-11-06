@@ -30,18 +30,40 @@ export interface GateRow {
   locked: boolean;
 }
 
-/** The sheet's colour legend (tab "Hansal", rows 36–40). */
+/** The sheet's colour legend (tab "Hansal", rows 36–44 and HansalV2). */
 export const STEP_COLOURS: Record<string, { bg: string; ring: string; text: string; legend: string }> = {
   D9EAD3: { bg: '#D9EAD3', ring: '#9CC98F', text: '#1F4D10', legend: 'Other agencies (before installation)' },
   C9DAF8: { bg: '#C9DAF8', ring: '#8FB0EE', text: '#123F99', legend: 'Other agencies (after installation)' },
   CFE2F3: { bg: '#CFE2F3', ring: '#93BEE3', text: '#123F99', legend: 'Other agencies (after installation)' },
-  E06666: { bg: '#E06666', ring: '#C23B3B', text: '#FFFFFF', legend: 'Installers' },
-  F4CCCC: { bg: '#F4CCCC', ring: '#E59A9A', text: '#7A0F0F', legend: 'Programmers' },
-  F9CB9C: { bg: '#F9CB9C', ring: '#EFA35C', text: '#6B3500', legend: 'VTECH PM (handover docs)' },
-  FF00FF: { bg: '#FF00FF', ring: '#C000C0', text: '#FFFFFF', legend: 'VTECH PM' },
+  E06666: { bg: '#E06666', ring: '#C23B3B', text: '#FFFFFF', legend: 'VTech Installers' },
+  F4CCCC: { bg: '#F4CCCC', ring: '#E59A9A', text: '#7A0F0F', legend: 'VTech Programmers' },
+  F9CB9C: { bg: '#F9CB9C', ring: '#EFA35C', text: '#6B3500', legend: 'VTECH PM' },
+  FF00FF: { bg: '#FF00FF', ring: '#C000C0', text: '#FFFFFF', legend: 'Client / Architect' },
   '9900FF': { bg: '#9900FF', ring: '#6B00B3', text: '#FFFFFF', legend: 'Electrician' },
+  '666666': { bg: '#666666', ring: '#4B5563', text: '#FFFFFF', legend: 'VTECH Sales' },
 };
-export const LEGEND_ORDER = ['D9EAD3', 'E06666', 'F4CCCC', 'C9DAF8', '9900FF', 'FF00FF', 'F9CB9C'];
+export const LEGEND_ORDER = ['D9EAD3', 'E06666', 'F4CCCC', 'C9DAF8', '9900FF', 'FF00FF', 'F9CB9C', '666666'];
+
+export function formatBlockedBy(responsible?: string | null, agencyCompanyName?: string | null): string {
+  if (!responsible) return 'Unassigned';
+  const rLower = responsible.toLowerCase();
+  if (rLower.includes('install')) return 'Installer – VTech';
+  if (rLower.includes('program')) return 'Programmer – VTech';
+  if (rLower.includes('sales')) return 'Sales – VTech';
+  if (rLower.includes('stock')) return 'Stock – VTech';
+  if (rLower === 'vtech pm' || rLower.includes('pm –') || rLower === 'pm' || rLower.includes('project manager')) {
+    return 'PM – VTech';
+  }
+  if (rLower.includes('vtech')) return `${responsible} – VTech`;
+
+  if (agencyCompanyName && agencyCompanyName.trim() && agencyCompanyName !== '—') {
+    if (!agencyCompanyName.toLowerCase().includes(responsible.toLowerCase())) {
+      return `${responsible} – ${agencyCompanyName.trim()}`;
+    }
+    return agencyCompanyName.trim();
+  }
+  return responsible;
+}
 
 export function stepColour(hex?: string | null) {
   return STEP_COLOURS[(hex ?? '').toUpperCase()] ?? { bg: '#E5E7EB', ring: '#CBD5E1', text: '#334155', legend: 'Other' };

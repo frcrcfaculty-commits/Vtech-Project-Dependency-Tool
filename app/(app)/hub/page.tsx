@@ -22,7 +22,7 @@ import { EditProjectDialog } from '@/components/v4/edit-project-dialog';
 import { CustomStepsDialog } from '@/components/v4/custom-steps-dialog';
 import { DASHBOARD_CHANGED } from '@/components/v4/notifications-bell';
 import { GroupingToggle, type SortBy } from '@/components/v6/grouping-toggle';
-import { LEGEND_ORDER, STEP_COLOURS, isDone, lineStatus, stepColour, type GateRow } from '@/lib/client/steps';
+import { LEGEND_ORDER, STEP_COLOURS, isDone, lineStatus, stepColour, formatBlockedBy, type GateRow } from '@/lib/client/steps';
 
 type ProjectStatus = 'active' | 'on_hold' | 'closed' | 'finished';
 interface ProjectTile {
@@ -149,18 +149,20 @@ function Dashboard() {
   };
 
   const [stepAgencyTypes, setStepAgencyTypes] = useState<Map<string, string>>(new Map());
+  const [responsibleMap, setResponsibleMap] = useState<Map<string, { responsible: string; via_reason: boolean }>>(new Map());
 
   // ── load all active data ──
   const loadAllData = useCallback(async () => {
     setDetailLoading(true);
     const sb = supabaseBrowser();
-    const [f, r, a, l, g, ps] = await Promise.all([
+    const [f, r, a, l, g, ps, ir] = await Promise.all([
       sb.from('floors').select('id, project_id, label, sort').order('sort'),
       sb.from('rooms').select('id, project_id, floor_id, name, sort').order('sort'),
       sb.from('agencies').select('id, project_id, company_name, agency_types(name, internal, active)'),
       sb.from('room_products').select('id, project_id, room_id, product_id, boq_title, location, quantity, brand, make, model, product_catalogue(title, scope)'),
       sb.from('item_gate').select('*').order('seq'),
       sb.from('product_steps').select('id, agency_types(name)'),
+      sb.from('item_responsible').select('item_id, responsible, via_reason'),
     ]);
     const err = [f, r, a, l, g, ps].find((x) => x.error)?.error;
     if (err) setError(err.message);
@@ -174,6 +176,13 @@ function Dashboard() {
       if (s.agency_types?.name) stepMap.set(s.id, s.agency_types.name);
     }
     setStepAgencyTypes(stepMap);
+
+    const rMap = new Map<string, { responsible: string; via_reason: boolean }>();
+    for (const row of ((ir?.data ?? []) as { item_id: string; responsible: string; via_reason: boolean }[])) {
+      if (row.item_id) rMap.set(row.item_id, row);
+    }
+    setResponsibleMap(rMap);
+
     setDetailLoading(false);
   }, []);
 
@@ -338,13 +347,19 @@ function Dashboard() {
       (g) => (g.responsibility === 'external' || g.responsibility === 'client') && g.status === 'pending'
     ).length;
 
-    // 3. VTech Installer: total · done · pending of installer steps (sheet colour E06666)
+    // 3. VTech Readiness: all green (D9EAD3) steps: total · done (green) · pending (red)
+    const readinessSteps = activeGate.filter((g) => (g.sheet_colour ?? '').toUpperCase() === 'D9EAD3');
+    const readinessTotal = readinessSteps.length;
+    const readinessDone = readinessSteps.filter((g) => isDone(g.status)).length;
+    const readinessPending = readinessSteps.filter((g) => g.status === 'pending').length;
+
+    // 4. VTech Installer: total · done · pending of installer steps (sheet colour E06666)
     const installerSteps = activeGate.filter((g) => (g.sheet_colour ?? '').toUpperCase() === 'E06666');
     const installerTotal = installerSteps.length;
     const installerDone = installerSteps.filter((g) => isDone(g.status)).length;
     const installerPending = installerSteps.filter((g) => g.status === 'pending').length;
 
-    // 4. VTech Programmer: total · done · pending of programmer steps (sheet colour F4CCCC)
+    // 5. VTech Programmer: total · done · pending of programmer steps (sheet colour F4CCCC)
     const programmerSteps = activeGate.filter((g) => (g.sheet_colour ?? '').toUpperCase() === 'F4CCCC');
     const programmerTotal = programmerSteps.length;
     const programmerDone = programmerSteps.filter((g) => isDone(g.status)).length;
@@ -358,6 +373,7 @@ function Dashboard() {
     return {
       products: { total: totalLines, done: doneLines, notDone: notDoneLines },
       otherAgencyPending,
+      readiness: { total: readinessTotal, done: readinessDone, pending: readinessPending },
       installer: { total: installerTotal, done: installerDone, pending: installerPending },
       programmer: { total: programmerTotal, done: programmerDone, pending: programmerPending },
       chaseable,
@@ -378,9 +394,12 @@ function Dashboard() {
 
         const currentAgency = currentStep?.agency_id ? agencyById.get(currentStep.agency_id) : undefined;
         const currentDefType = currentStep?.step_id ? stepAgencyTypes.get(currentStep.step_id) : undefined;
-        const waitingOnAgency = currentStep ? formatAgency(currentAgency, currentDefType, currentStep.sheet_colour) : null;
+        const resp = currentStep ? responsibleMap.get(currentStep.item_id) : null;
+        const blockedBy = currentStep
+          ? formatBlockedBy(resp?.responsible || currentAgency?.agency_types?.name || currentDefType, currentAgency?.company_name)
+          : null;
 
-        return { line: l, gate: g, st, currentStep, waitingOnAgency, project: projectById.get(l.project_id ?? '') };
+        return { line: l, gate: g, st, currentStep, waitingOnAgency: blockedBy, blockedBy, project: projectById.get(l.project_id ?? '') };
       })
       .filter(({ line, gate: g, st, currentStep }) => {
         // Search filter
@@ -646,8 +665,8 @@ function Dashboard() {
           </section>
         )}
 
-        {/* 4 stat cards */}
-        <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {/* 5 stat cards in one line */}
+        <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-5">
           <Stat
             label="Products (line items)"
             value={
@@ -663,6 +682,18 @@ function Dashboard() {
           <Stat
             label="Other agency"
             value={<span className="text-danger">{totals.otherAgencyPending}</span>}
+          />
+          <Stat
+            label="VTech Readiness"
+            value={
+              <>
+                <span className="text-text-primary">{totals.readiness.total}</span>
+                <span className="text-text-muted"> · </span>
+                <span className="text-success">{totals.readiness.done}</span>
+                <span className="text-text-muted"> · </span>
+                <span className="text-danger">{totals.readiness.pending}</span>
+              </>
+            }
           />
           <Stat
             label="VTech Installer"
@@ -797,9 +828,9 @@ function Dashboard() {
                                     </p>
                                     {spec && <p className="truncate text-xs text-text-muted">{spec}</p>}
                                     {waitingOnAgency && (
-                                      <p className="mt-1 flex items-center gap-1 text-xs text-text-secondary" title={waitingOnAgency}>
+                                      <p className="mt-1 flex items-center gap-1 text-xs text-text-secondary" title={`Blocked by: ${waitingOnAgency}`}>
                                         <Glyph name="building" className="h-3.5 w-3.5 shrink-0 text-text-muted" />
-                                        <span className="truncate">Waiting on {waitingOnAgency}</span>
+                                        <span className="truncate">Blocked by {waitingOnAgency}</span>
                                       </p>
                                     )}
                                   </div>
@@ -911,9 +942,9 @@ function Dashboard() {
 }
 
 /** Segmented colour bar: one segment per step, coloured by sheet_colour.
- * Every pending step shows ✗ (not only one).
- * Done/N.A. steps show ✓.
- * Open-but-not-pending and locked steps show no mark.
+ * ✓ = done/N.A.
+ * ✗ = open (not locked) and not done = the dependency being worked on now.
+ * Locked / not started = blank (no mark). Red/orange etc. stay blank until they open.
  * The "being worked on" step keeps its dark outline.
  */
 function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: GateRow) => void }) {
@@ -931,10 +962,10 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
           const c = stepColour(r.sheet_colour);
           const done = isDone(r.status);
           const locked = r.locked && !done;
-          const isStuck = r.status === 'pending';
+          const isOpen = !locked && !done;
           const isCurrent = currentStep ? r.item_id === currentStep.item_id : false;
 
-          const tip = `${r.label}${done ? ' (done)' : isCurrent ? ` (being worked on${r.stuck_reason ? `: ${r.stuck_reason}` : ''})` : isStuck ? ` (stuck: ${r.stuck_reason || 'not done'})` : locked ? ' (locked)' : ' (open)'}`;
+          const tip = `${r.label}${done ? ' (done)' : isCurrent ? ` (being worked on${r.stuck_reason ? `: ${r.stuck_reason}` : ''})` : isOpen ? ` (open${r.stuck_reason ? `: ${r.stuck_reason}` : ''})` : ' (locked)'}`;
           const markColor = c.text === '#FFFFFF' ? '#ffffff' : '#0f172a';
 
           return (
@@ -951,8 +982,8 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
                 locked ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'
               }`}
               style={{
-                backgroundColor: done || isStuck || isCurrent ? c.bg : locked ? c.bg : 'transparent',
-                borderColor: isCurrent ? '#0f172a' : isStuck ? c.ring : done ? c.ring : locked ? 'transparent' : c.ring,
+                backgroundColor: done || isOpen ? c.bg : 'transparent',
+                borderColor: isCurrent ? '#0f172a' : isOpen ? c.ring : done ? c.ring : 'transparent',
                 borderWidth: isCurrent ? '2px' : done ? '1px' : locked ? '0px' : '2px',
                 borderStyle: 'solid',
                 boxShadow: isCurrent ? '0 0 0 1px #0f172a' : undefined,
@@ -973,8 +1004,8 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
                 >
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
-              ) : (
-                // ✗ on every step that is not done (VTech, 2026-11-05)
+              ) : isOpen ? (
+                // ✗ = open (not locked) and not done = the dependency being worked on now
                 <svg
                   viewBox="0 0 24 24"
                   width="10"
@@ -989,7 +1020,7 @@ function SegmentedColorBar({ steps, onOpen }: { steps: GateRow[]; onOpen: (r: Ga
                 >
                   <path d="M18 6 6 18M6 6l12 12" />
                 </svg>
-              )}
+              ) : null}
             </button>
           );
         })}

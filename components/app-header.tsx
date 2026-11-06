@@ -83,7 +83,17 @@ export function AppHeader() {
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  Projects
+                  BOQ
+                </Link>
+                <Link
+                  href="/reminders"
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    pathname.startsWith('/reminders')
+                      ? 'bg-surface-alt text-text-primary font-semibold'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Reminders
                 </Link>
                 {isSuperAdmin && (
                   <Link
@@ -193,7 +203,18 @@ export function AppHeader() {
                             : 'text-text-primary hover:bg-surface-alt'
                         }`}
                       >
-                        Projects
+                        BOQ
+                      </Link>
+                      <Link
+                        href="/reminders"
+                        onClick={() => setMenuOpen(false)}
+                        className={`block px-4 py-2 text-sm transition-colors ${
+                          pathname.startsWith('/reminders')
+                            ? 'font-bold text-accent bg-accent/10'
+                            : 'text-text-primary hover:bg-surface-alt'
+                        }`}
+                      >
+                        Reminders
                       </Link>
                       {isSuperAdmin && (
                         <Link
@@ -281,7 +302,18 @@ export function AppHeader() {
                   : 'text-text-secondary hover:bg-surface-alt hover:text-text-primary'
               }`}
             >
-              Projects
+              BOQ
+            </Link>
+            <Link
+              href="/reminders"
+              onClick={() => setMobileNavOpen(false)}
+              className={`flex items-center rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                pathname.startsWith('/reminders')
+                  ? 'bg-surface-alt text-text-primary font-bold'
+                  : 'text-text-secondary hover:bg-surface-alt hover:text-text-primary'
+              }`}
+            >
+              Reminders
             </Link>
             {isSuperAdmin && (
               <Link
