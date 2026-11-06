@@ -4,7 +4,7 @@ import 'regenerator-runtime/runtime.js';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFPage } from 'pdf-lib';
 import type { PdfFonts } from './pendingReport';
-import { drawLogo, draw, wrap, sanitize, type Face, formatDate } from './pendingReport';
+import { drawLogo, registerLogo, draw, wrap, sanitize, type Face, formatDate } from './pendingReport';
 
 export interface BoqProjectLine {
   floorLabel: string;
@@ -45,6 +45,7 @@ const COLS = [
 
 export async function buildAllBoqPdf(input: AllBoqPdfInput, fonts: PdfFonts): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  await registerLogo(doc);
   doc.registerFontkit(fontkit);
   doc.setTitle(`VTech – All Products (BOQ) – ${input.generatedOn}`);
   doc.setProducer('VTech Site Dependency Tracker');

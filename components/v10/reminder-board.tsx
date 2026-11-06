@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabaseBrowser } from '@/lib/client/supabase';
 import Link from 'next/link';
 
@@ -165,6 +165,12 @@ export function ReminderBoard({
   };
 
   // ───────────────────────── DATA LOADING ─────────────────────────
+  // Parent callbacks are often inline functions: keep them in refs so a re-render doesn't re-trigger loading
+  // (that loop kept /reminders on a spinner forever).
+  const onLoadedRef = useRef(onCategoriesLoaded);
+  const initialNameRef = useRef(initialProjectName);
+  useEffect(() => { onLoadedRef.current = onCategoriesLoaded; initialNameRef.current = initialProjectName; });
+
   const loadCategoriesData = useCallback(async () => {
     if (!projectId) return;
     try {
@@ -173,7 +179,7 @@ export function ReminderBoard({
       const sb = supabaseBrowser();
 
       // Load project title
-      let pName = initialProjectName || 'Project';
+      let pName = initialNameRef.current || 'Project';
       const { data: projData } = await sb
         .from('projects')
         .select('name')
@@ -287,9 +293,7 @@ export function ReminderBoard({
       }
 
       setCategories(loadedCats);
-      if (onCategoriesLoaded) {
-        onCategoriesLoaded(loadedCats, pName);
-      }
+      onLoadedRef.current?.(loadedCats, pName);
 
       // Initialize default checkbox selections:
       // Client group stays unticked by default
@@ -314,7 +318,7 @@ export function ReminderBoard({
     } finally {
       setLoading(false);
     }
-  }, [projectId, initialProjectName, onCategoriesLoaded]);
+  }, [projectId]);
 
   useEffect(() => {
     loadCategoriesData();

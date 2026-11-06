@@ -5,11 +5,25 @@
 // @pdf-lib/fontkit's Indic shaper is Babel-compiled and expects a global regeneratorRuntime.
 import 'regenerator-runtime/runtime.js';
 import fontkit from '@pdf-lib/fontkit';
-import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
 import { VTECH_WORDMARK_PATH, VTECH_WORDMARK_VIEWBOX } from '../brand';
+import { LOGO_ASPECT, LOGO_PNG_BASE64 } from './logo';
 
-/** VTech wordmark (vector, brand violet) with its top-right corner at (right, top). Returns the drawn width. */
+const logos = new WeakMap<PDFDocument, PDFImage>();
+
+/** Embeds the VTech logo once per document; call right after PDFDocument.create(). */
+export async function registerLogo(doc: PDFDocument): Promise<void> {
+  logos.set(doc, await doc.embedPng(Buffer.from(LOGO_PNG_BASE64, 'base64')));
+}
+
+/** VTech logo with its top-right corner at (right, top). Returns the drawn width. Falls back to the vector wordmark if not registered. */
 export function drawLogo(page: PDFPage, right: number, top: number, height = 16): number {
+  const img = logos.get(page.doc);
+  if (img) {
+    const h = height * 1.6, w = h * LOGO_ASPECT; // the logo carries the tagline, so it gets a little more height
+    page.drawImage(img, { x: right - w, y: top - h, width: w, height: h });
+    return w;
+  }
   const [vx, vy, vw, vh] = VTECH_WORDMARK_VIEWBOX.split(' ').map(Number);
   const s = height / vh;
   // drawSvgPath maps SVG y (downwards) from the given origin, so the origin is the viewBox's (0,0) point.
@@ -159,6 +173,7 @@ const LINE = rgb(0.86, 0.87, 0.9);
 
 export async function buildPendingPdf(input: PdfInput, fonts: PdfFonts): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  await registerLogo(doc);
   doc.registerFontkit(fontkit);
   doc.setTitle(`Pending items – ${input.projectName}`);
   doc.setProducer('VTech Site Dependency Tracker');

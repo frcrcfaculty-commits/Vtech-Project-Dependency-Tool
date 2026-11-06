@@ -4,7 +4,7 @@
 import 'regenerator-runtime/runtime.js';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFPage } from 'pdf-lib';
-import { draw, drawLogo, formatDate, roomLabel, sanitize, wrap, type Face, type PdfFonts } from './pendingReport';
+import { draw, drawLogo, registerLogo, formatDate, roomLabel, sanitize, wrap, type Face, type PdfFonts } from './pendingReport';
 
 export interface CompletedItem {
   floorLabel: string;
@@ -47,6 +47,7 @@ const COLS = [
 
 export async function buildCompletedPdf(input: CompletedPdfInput, fonts: PdfFonts): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  await registerLogo(doc);
   doc.registerFontkit(fontkit);
   doc.setTitle(`VTech – completed items – ${input.generatedOn}`);
   doc.setProducer('VTech Site Dependency Tracker');

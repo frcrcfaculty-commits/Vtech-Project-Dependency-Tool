@@ -4,7 +4,7 @@ import 'regenerator-runtime/runtime.js';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFPage } from 'pdf-lib';
 import type { PdfFonts } from './pendingReport';
-import { drawLogo, draw, wrap, sanitize, type Face, formatDate } from './pendingReport';
+import { drawLogo, registerLogo, draw, wrap, sanitize, type Face, formatDate } from './pendingReport';
 
 const A4: [number, number] = [595.28, 841.89];
 const M = 36;
@@ -67,6 +67,7 @@ export async function buildBoqComparisonPdf(
   fonts: PdfFonts
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  await registerLogo(doc);
   doc.registerFontkit(fontkit);
   doc.setTitle(`BOQ Comparison – ${input.projectName}`);
   doc.setProducer('VTech Site Dependency Tracker');

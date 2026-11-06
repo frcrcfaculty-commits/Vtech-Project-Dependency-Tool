@@ -25,7 +25,7 @@ export function SendReminderFab() {
 
   // Hidden on login and on any Reminders page itself
   // hidden on the BOQ manager page (/projects): its tables run under the floating buttons
-  const hidden = pathname.startsWith('/login') || pathname.includes('/reminders') || pathname === '/projects';
+  const hidden = pathname.startsWith('/login') || pathname.includes('/reminders') || pathname === '/projects' || pathname.startsWith('/hub'); // Dashboard has its own Send reminders button in the header
 
   // Detect project in current context
   const currentProjectId =
