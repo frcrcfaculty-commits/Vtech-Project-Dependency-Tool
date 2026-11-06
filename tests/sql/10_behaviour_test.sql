@@ -278,9 +278,9 @@ end $$;
 reset role;
 
 -- ── 0007 product tracking ──
-select pg_temp.assert((select count(*) from public.product_catalogue) = 27, '27 products from the Hansal sheet');
-select pg_temp.assert((select count(*) from public.product_steps) = 163, '163 product steps');
-select pg_temp.assert((select count(*) from public.agency_types where internal) = 5, '5 internal agency types (incl. VTECH PM, 0010)');
+select pg_temp.assert((select count(*) from public.product_catalogue) = 33, '27 products from the Hansal sheet + 6 added in 0015');
+select pg_temp.assert((select count(*) from public.product_steps) = 184, '163 product steps + 21 added in 0015');
+select pg_temp.assert((select count(*) from public.agency_types where internal) = 7, '7 internal agency types (incl. VTECH PM, VTECH Sales, VTECH Stock)');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 set role authenticated;
 create temp table t_sp as select id from public.product_catalogue where title = 'Speakers';
@@ -413,16 +413,16 @@ reset role;
 
 -- ── v5 (0010): HansalV2 agency groups, magenta/purple colours, reminder categories ──
 reset role;
-select pg_temp.assert((select count(*) from public.agency_types where active) = 7, 'v5: exactly 7 active agency groups');
+select pg_temp.assert((select count(*) from public.agency_types where active) = 8, 'v5+v10: 8 active agency groups (VTECH Sales added)');
 select pg_temp.assert((select string_agg(name || ':' || coalesce(contact_slots::text, '+'), ',' order by sort) from public.agency_types where active)
-  = 'Client:3,PMC / Architect / Client person:6,Electrician:2,Carpenter:2,VTECH PM:+,VTech Installers:+,VTech Programmers:+', 'v5: groups in order with contact slots');
+  = 'Client:3,PMC / Architect / Client person:6,Electrician:2,Carpenter:2,VTECH Sales:+,VTECH PM:+,VTech Installers:+,VTech Programmers:+', 'v5: groups in order with contact slots');
 select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where not t.active) = 0, 'v5: no step defaults to a retired type');
-select pg_temp.assert((select count(*) from public.step_reasons r left join public.agency_types t on lower(t.name) = lower(r.agency_type) where r.agency_type is not null and not coalesce(t.active, false)) = 0, 'v5: every stuck reason points to an active group');
-select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where s.sheet_colour = 'FF00FF' and t.name = 'VTECH PM' and s.responsibility = 'internal') = 5, 'v5: 5 magenta steps belong to VTECH PM');
+select pg_temp.assert((select count(*) from public.step_reasons r left join public.agency_types t on lower(t.name) = lower(r.agency_type) where r.agency_type is not null and r.agency_type <> 'VTECH Stock' and not coalesce(t.active, false)) = 0, 'v5: every stuck reason points to an active group (VTECH Stock is a counted stakeholder only)');
+select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where s.sheet_colour = 'FF00FF' and t.name = 'PMC / Architect / Client person' and s.responsibility = 'external') = 7, 'v10: 7 magenta steps (5 + EPABX, NVR) belong to Client / Architect');
 select pg_temp.assert((select count(*) from public.product_steps s join public.agency_types t on t.id = s.default_agency_type_id where s.sheet_colour = '9900FF' and t.name = 'Electrician') = 5, 'v5: 5 purple steps belong to the electrician');
-select pg_temp.assert((select count(*) from public.reminder_categories) = 6, 'v5: 6 reminder categories (Reminder Format tab + sales)');
+select pg_temp.assert((select count(*) from public.reminder_categories) = 7, 'v10: 7 reminder categories (+ PM, VTECH Sales)');
 select pg_temp.assert((select string_agg(c.key || ':' || t.name || ':' || r.default_checked, ',' order by c.sort, r.sort) from public.reminder_category_recipients r join public.reminder_categories c on c.key = r.category_key join public.agency_types t on t.id = r.agency_type_id where c.key in ('all', 'electrical'))
-  = 'all:Client:false,all:PMC / Architect / Client person:true,all:Electrician:true,all:Carpenter:true,all:VTECH PM:true,all:VTech Installers:true,all:VTech Programmers:true,electrical:Electrician:true', 'v5+v7: recipients and defaults (HansalV2 col C + sketch)');
+  = 'all:Client:false,all:PMC / Architect / Client person:true,all:Electrician:true,all:Carpenter:true,all:VTECH PM:true,all:VTech Installers:true,all:VTech Programmers:true,all:VTECH Sales:true,electrical:Electrician:true', 'v5+v7: recipients and defaults (HansalV2 col C + sketch)');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 set role authenticated;
 insert into public.projects (name, client_name) values ('TEST – v5', 'v5') ;
@@ -431,12 +431,12 @@ insert into public.floors (project_id, label, sort) select id, 'Ground', 1 from 
 insert into public.rooms (project_id, floor_id, name, sort) select f.project_id, f.id, 'Rack', 1 from public.floors f where f.project_id = (select id from t_v5p);
 create temp table t_v5 as select public.add_room_product((select id from t_v5p), (select id from public.rooms where project_id = (select id from t_v5p)), (select id from public.product_catalogue where title = 'Switch /Router'), null) as id;
 create temp table t_v5i as select item_id, label from public.item_gate where room_product_id = (select id from t_v5);
-select pg_temp.assert(not (select waits_on_client from public.item_gate where item_id = (select item_id from t_v5i where label = 'Internet activation')), 'v5: internet activation no longer waits on client');
+select pg_temp.assert(not (select waits_on_client from public.item_gate where item_id = (select item_id from t_v5i where label = 'Internet activation')), 'v5/v10: internet activation waits on the client person, not the owner');
 reset role;
 update public.dependency_items set status = 'pending' where id in (select item_id from t_v5i where label in ('Internet activation', 'Readiness of cable'));
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 set role authenticated;
-select pg_temp.assert((select string_agg(category_key, ',' order by category_key) from public.reminder_category_items where item_id = (select item_id from t_v5i where label = 'Internet activation')) = 'all,sales', 'v5: magenta item listed under All + Sales');
+select pg_temp.assert((select string_agg(category_key, ',' order by category_key) from public.reminder_category_items where item_id = (select item_id from t_v5i where label = 'Internet activation')) = 'all', 'v10: magenta item listed under All (Client / Architect)');
 select pg_temp.assert((select string_agg(category_key, ',' order by category_key) from public.reminder_category_items where item_id = (select item_id from t_v5i where label = 'Readiness of cable')) = 'all,electrical', 'v5: electrician item listed under All + Only electrical');
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
@@ -450,7 +450,7 @@ reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
 set role authenticated;
 select pg_temp.assert((select count(*) from public.reminder_category_items) = 0, 'v5: outsider sees no category items (RLS)');
-select pg_temp.assert((select count(*) from public.reminder_categories) = 6, 'v5: any user reads the categories');
+select pg_temp.assert((select count(*) from public.reminder_categories) = 7, 'v5: any user reads the categories');
 reset role;
 
 -- ── v6 (0011): contact follow-ups ──
@@ -476,9 +476,9 @@ reset role;
 -- ── v7 (0012): reminder sections, change requests, BOQ history ──
 reset role;
 select pg_temp.assert((select string_agg(key || ':' || section, ',' order by sort) from public.reminder_categories)
-  = 'all:all,installer:vtech,programmer:vtech,electrical:other,carpentry:other,sales:vtech', 'v7: categories grouped in 3 sections');
+  = 'all:all,installer:vtech,programmer:vtech,electrical:other,carpentry:other,sales:vtech,vtech_sales:vtech', 'v7: categories grouped in 3 sections');
 select pg_temp.assert((select string_agg(t.name, ',' order by r.sort) from public.reminder_category_recipients r join public.agency_types t on t.id = r.agency_type_id where r.category_key = 'all')
-  = 'Client,PMC / Architect / Client person,Electrician,Carpenter,VTECH PM,VTech Installers,VTech Programmers', 'v7: All dependencies offers all 7 groups');
+  = 'Client,PMC / Architect / Client person,Electrician,Carpenter,VTECH PM,VTech Installers,VTech Programmers,VTECH Sales', 'v7+v10: All dependencies offers all 8 groups');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 set role authenticated;
 select pg_temp.assert((select count(*) from public.boq_events where project_id = (select id from t_v5p) and event = 'added') = 1, 'v7: placing a product logs an "added" BOQ event');
@@ -507,5 +507,23 @@ select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
 set role authenticated;
 select pg_temp.assert((select count(*) from public.boq_events where project_id = (select id from t_v5p)) = 0, 'v7: outsider sees no BOQ history');
 reset role;
+
+-- ── v10 (0015): green breakdown — the stuck reason's stakeholder is "blocked by" ──
+reset role;
+create temp table t_v10 as select g.item_id from public.item_gate g join public.room_products rp on rp.id = g.room_product_id
+ join public.product_catalogue pc on pc.id = rp.product_id
+ where rp.project_id = (select id from t_v5p) and pc.title = 'Keypad' and g.label like 'Delivery pending%' limit 1;
+grant select on t_v10 to authenticated;
+update public.dependency_items set status = 'pending', stuck_reason = 'Sales Clearance awaited' where id = (select item_id from t_v10);
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+set role authenticated;
+select pg_temp.assert((select responsible || ':' || via_reason from public.item_responsible where item_id = (select item_id from t_v10)) = 'VTECH Sales:true', 'v10: stuck reason "Sales Clearance awaited" → blocked by VTECH Sales');
+select pg_temp.assert((select string_agg(category_key, ',' order by category_key) from public.reminder_category_items where item_id = (select item_id from t_v10)) = 'all,vtech_sales', 'v10: item listed under All + VTECH Sales dependency');
+reset role;
+update public.dependency_items set stuck_reason = 'Stock purchase awaited' where id = (select item_id from t_v10);
+select pg_temp.assert((select responsible from public.item_responsible where item_id = (select item_id from t_v10)) = 'VTECH Stock', 'v10: stock purchase → blocked by VTECH Stock');
+update public.dependency_items set stuck_reason = null where id = (select item_id from t_v10);
+select pg_temp.assert((select via_reason from public.item_responsible where item_id = (select item_id from t_v10)) = false, 'v10: without a reason the assigned/default group stays responsible');
+select pg_temp.assert((select count(*) from public.product_steps s join public.product_catalogue p on p.id = s.product_id where p.title in ('EPABX backend','EPABX room socket','Power sockets','NVR','Ventilation of AV Rack','Ventilation of DB')) = 21, 'v10: 6 new products with 21 steps');
 
 \echo ALL SQL TESTS PASSED
