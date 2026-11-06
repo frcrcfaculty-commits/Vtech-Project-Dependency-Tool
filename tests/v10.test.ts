@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { formatBlockedBy, STEP_COLOURS } from '../lib/client/steps';
+import { formatISTDate } from '../lib/pdf/boqComparisonReport';
 
 describe('VTech Tracker v10 helpers', () => {
   it('formats responsible agency correctly according to rules', () => {
@@ -34,5 +35,15 @@ describe('VTech Tracker v10 helpers', () => {
 
     // Green D9EAD3 = Readiness
     expect(STEP_COLOURS['D9EAD3']).toBeDefined();
+  });
+
+  it('formats IST date correctly for comparison PDF headers', () => {
+    expect(formatISTDate(null)).toBe('—');
+    expect(formatISTDate(undefined)).toBe('—');
+    expect(formatISTDate('invalid-date')).toBe('—');
+
+    // 2026-11-04 UTC converts to 04 Nov 2026 IST
+    const formatted = formatISTDate('2026-11-04T10:00:00Z');
+    expect(formatted).toMatch(/04 Nov 2026/);
   });
 });

@@ -171,7 +171,14 @@ export default function AdminPage() {
 
   const showSuccessNotice = (msg: string) => {
     setNotice(msg);
-    setTimeout(() => setNotice(null), 3000);
+    setError(null);
+    setTimeout(() => setNotice(null), 4000);
+  };
+
+  const showErrorNotice = (msg: string) => {
+    setError(msg);
+    setNotice(null);
+    setTimeout(() => setError(null), 5000);
   };
 
   // Create User
@@ -345,17 +352,83 @@ export default function AdminPage() {
     }
   }
 
+  function handleSelectStepColour(hex: string) {
+    const norm = hex.toUpperCase().replace('#', '').trim();
+    setStepSheetColour(norm);
+
+    if (norm === 'D9EAD3') {
+      // D9EAD3 → external, phase 1, gate 'none', pick group
+      setStepPhase(1);
+      setStepResponsibility('external');
+      setStepGate('none');
+    } else if (norm === 'C9DAF8') {
+      // C9DAF8 → external, phase 2, gate 'after_external', pick group
+      setStepPhase(2);
+      setStepResponsibility('external');
+      setStepGate('after_external');
+    } else if (norm === '9900FF') {
+      // 9900FF → Electrician, phase 2, gate 'after_external'
+      setStepPhase(2);
+      setStepResponsibility('external');
+      setStepGate('after_external');
+      const at = agencyTypes.find((t) => t.name.toLowerCase().includes('electrician'));
+      if (at) setStepDefaultAgencyTypeId(at.id);
+    } else if (norm === 'E06666') {
+      // E06666 → VTech Installers, phase 2, gate 'after_external'
+      setStepPhase(2);
+      setStepResponsibility('internal');
+      setStepGate('after_external');
+      const at = agencyTypes.find((t) => t.name.toLowerCase().includes('installer'));
+      if (at) setStepDefaultAgencyTypeId(at.id);
+    } else if (norm === 'F4CCCC') {
+      // F4CCCC → VTech Programmers, phase 2, gate 'after_external'
+      setStepPhase(2);
+      setStepResponsibility('internal');
+      setStepGate('after_external');
+      const at = agencyTypes.find((t) => t.name.toLowerCase().includes('programmer'));
+      if (at) setStepDefaultAgencyTypeId(at.id);
+    } else if (norm === 'F9CB9C') {
+      // F9CB9C → VTECH PM, phase 2, gate 'after_external'
+      setStepPhase(2);
+      setStepResponsibility('internal');
+      setStepGate('after_external');
+      const at = agencyTypes.find(
+        (t) => t.name.toLowerCase() === 'vtech pm' || t.name.toLowerCase().includes('project manager')
+      );
+      if (at) setStepDefaultAgencyTypeId(at.id);
+    } else if (norm === 'FF00FF') {
+      // FF00FF → PMC / Architect / Client person, phase 2, gate 'after_external'
+      setStepPhase(2);
+      setStepResponsibility('client');
+      setStepGate('after_external');
+      const at = agencyTypes.find(
+        (t) =>
+          t.name.toLowerCase().includes('architect') ||
+          t.name.toLowerCase().includes('client') ||
+          t.name.toLowerCase().includes('pmc')
+      );
+      if (at) setStepDefaultAgencyTypeId(at.id);
+    } else if (norm === '666666') {
+      // 666666 → VTECH Sales, phase 2, gate 'after_external'
+      setStepPhase(2);
+      setStepResponsibility('internal');
+      setStepGate('after_external');
+      const at = agencyTypes.find((t) => t.name.toLowerCase().includes('sales'));
+      if (at) setStepDefaultAgencyTypeId(at.id);
+    } else {
+      setStepPhase(2);
+      setStepGate('after_external');
+    }
+  }
+
   function handleOpenAddStep(productId: string) {
     setStepModalProductId(productId);
     setEditingStep(null);
     setStepLabel('');
-    setStepPhase(1);
-    setStepResponsibility('external');
-    setStepGate('none');
-    setStepSheetColour('D9EAD3');
     if (agencyTypes.length > 0) {
       setStepDefaultAgencyTypeId(agencyTypes[0].id);
     }
+    handleSelectStepColour('D9EAD3');
     setShowStepModal(true);
   }
 
@@ -373,47 +446,74 @@ export default function AdminPage() {
 
   async function handleSaveStep(e: React.FormEvent) {
     e.preventDefault();
-    if (!stepModalProductId || !stepLabel.trim() || !stepDefaultAgencyTypeId) return;
+    if (!stepModalProductId) return;
+    if (!stepLabel.trim()) {
+      showErrorNotice('Step label is required');
+      return;
+    }
+    if (!stepDefaultAgencyTypeId) {
+      showErrorNotice('Please select a default trade / agency');
+      return;
+    }
+    if (!stepSheetColour) {
+      showErrorNotice('Please pick a milestone colour');
+      return;
+    }
+
     try {
       const sb = supabaseBrowser();
       const prodSteps = catalogueSteps.filter((s) => s.product_id === stepModalProductId);
+      const normColour = stepSheetColour.toUpperCase().replace('#', '').trim();
+      const phase = stepPhase;
+      const gate = phase === 2 ? 'after_external' : stepGate;
 
       if (editingStep) {
         const { error: upErr } = await sb
           .from('product_steps')
           .update({
+            product_id: stepModalProductId,
+            seq: editingStep.seq,
             label: stepLabel.trim(),
-            phase: stepPhase,
+            phase,
             responsibility: stepResponsibility,
-            gate: stepGate,
+            gate,
             default_agency_type_id: stepDefaultAgencyTypeId,
-            sheet_colour: stepSheetColour.replace('#', '').trim() || null,
+            sheet_colour: normColour,
           })
           .eq('id', editingStep.id);
+
         if (upErr) throw upErr;
-        showSuccessNotice('Step updated');
+        showSuccessNotice(`Step "${stepLabel.trim()}" updated successfully`);
       } else {
-        const nextSeq = prodSteps.length > 0 ? Math.max(...prodSteps.map((s) => s.seq)) + 1 : 1;
+        // Ensure seq is unique for that product
+        const existingSeqs = new Set(prodSteps.map((s) => s.seq));
+        let nextSeq = 1;
+        while (existingSeqs.has(nextSeq)) {
+          nextSeq++;
+        }
+
         const { error: insErr } = await sb.from('product_steps').insert({
           product_id: stepModalProductId,
           seq: nextSeq,
           label: stepLabel.trim(),
-          phase: stepPhase,
+          phase,
           responsibility: stepResponsibility,
-          gate: stepGate,
+          gate,
           default_agency_type_id: stepDefaultAgencyTypeId,
-          sheet_colour: stepSheetColour.replace('#', '').trim() || null,
+          sheet_colour: normColour,
         });
+
         if (insErr) throw insErr;
-        showSuccessNotice('Step added to product');
+        showSuccessNotice(`Step "${stepLabel.trim()}" added to product`);
       }
 
       setShowStepModal(false);
       setEditingStep(null);
       setStepLabel('');
       await loadAll();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to save step');
+    } catch (err: any) {
+      const dbMsg = err?.message || err?.error_description || (typeof err === 'string' ? err : 'Database error occurred');
+      showErrorNotice(`Failed to save step: ${dbMsg}`);
     }
   }
 
@@ -633,8 +733,55 @@ export default function AdminPage() {
                   />
                 </div>
 
+                {/* Milestone Colour Selection */}
                 <div>
-                  <label className="block text-xs font-semibold text-text-secondary mb-1">Default Trade</label>
+                  <label className="block text-xs font-semibold text-text-secondary mb-1">
+                    Milestone Colour <span className="text-danger">*</span>
+                  </label>
+                  <p className="text-[11px] text-text-muted mb-2">
+                    Picking a colour automatically configures responsibility, phase, and trade.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { hex: 'D9EAD3', name: 'Green', desc: 'Phase 1 · External trade' },
+                      { hex: 'C9DAF8', name: 'Blue', desc: 'Phase 2 · External trade' },
+                      { hex: '9900FF', name: 'Purple', desc: 'Phase 2 · Electrician' },
+                      { hex: 'E06666', name: 'Dark Red', desc: 'Phase 2 · VTech Installers' },
+                      { hex: 'F4CCCC', name: 'Light Red', desc: 'Phase 2 · VTech Programmers' },
+                      { hex: 'F9CB9C', name: 'Orange', desc: 'Phase 2 · VTECH PM' },
+                      { hex: 'FF00FF', name: 'Magenta', desc: 'Phase 2 · Client / Architect' },
+                      { hex: '666666', name: 'Grey', desc: 'Phase 2 · VTECH Sales' },
+                    ].map((c) => {
+                      const isSelected = stepSheetColour.toUpperCase() === c.hex.toUpperCase();
+                      return (
+                        <button
+                          key={c.hex}
+                          type="button"
+                          onClick={() => handleSelectStepColour(c.hex)}
+                          className={`flex items-center gap-2 p-1.5 rounded-lg border text-left transition-all ${
+                            isSelected
+                              ? 'border-accent bg-accent/10 ring-1 ring-accent font-semibold'
+                              : 'border-border bg-surface hover:bg-surface-alt/60'
+                          }`}
+                        >
+                          <span
+                            className="h-4 w-4 shrink-0 rounded-full border border-black/20"
+                            style={{ backgroundColor: `#${c.hex}` }}
+                          />
+                          <div className="truncate min-w-0">
+                            <span className="block text-[11px] text-text-primary truncate">{c.name}</span>
+                            <span className="block text-[10px] text-text-muted truncate">{c.desc}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-secondary mb-1">
+                    Default Trade {['D9EAD3', 'C9DAF8'].includes(stepSheetColour.toUpperCase()) ? '(Pick group)' : '(Auto-assigned)'}
+                  </label>
                   <select
                     required
                     value={stepDefaultAgencyTypeId}
@@ -650,88 +797,17 @@ export default function AdminPage() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-text-secondary mb-1">Responsibility</label>
-                    <select
-                      value={stepResponsibility}
-                      onChange={(e) =>
-                        setStepResponsibility(e.target.value as 'external' | 'internal' | 'client')
-                      }
-                      className="w-full rounded-lg border border-border px-2.5 py-1.5 text-xs focus:border-accent"
-                    >
-                      <option value="external">External (Trade)</option>
-                      <option value="internal">Internal (VTech)</option>
-                      <option value="client">Client</option>
-                    </select>
+                {/* Derived Configuration Summary */}
+                <div className="rounded-lg border border-border/80 bg-surface-alt/60 p-2.5 text-[11px] text-text-secondary space-y-0.5">
+                  <div className="flex justify-between">
+                    <span>Responsibility:</span>
+                    <strong className="text-text-primary capitalize">{stepResponsibility}</strong>
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-text-secondary mb-1">Phase</label>
-                    <select
-                      value={stepPhase}
-                      onChange={(e) => setStepPhase(parseInt(e.target.value, 10) as 1 | 2)}
-                      className="w-full rounded-lg border border-border px-2.5 py-1.5 text-xs focus:border-accent"
-                    >
-                      <option value={1}>Phase 1 (Open)</option>
-                      <option value={2}>Phase 2 (Locked)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-secondary mb-1">Unlocking Gate Rule</label>
-                  <select
-                    value={stepGate}
-                    onChange={(e) =>
-                      setStepGate(e.target.value as 'none' | 'after_external' | 'after_previous')
-                    }
-                    className="w-full rounded-lg border border-border px-3 py-1.5 text-xs focus:border-accent"
-                  >
-                    <option value="none">none (Opens immediately in phase 1)</option>
-                    <option value="after_external">after_external (Unlocks when all green steps done)</option>
-                    <option value="after_previous">after_previous (Sequential chain)</option>
-                  </select>
-                </div>
-
-                {/* Sheet Colour selection */}
-                <div>
-                  <label className="block text-xs font-semibold text-text-secondary mb-1">
-                    Sheet Milestone Colour
-                  </label>
-                  <div className="flex items-center gap-2">
-                    {[
-                      { hex: 'D9EAD3', name: 'Green (Phase 1 other agencies)' },
-                      { hex: 'C9DAF8', name: 'Blue (Phase 2 other agencies)' },
-                      { hex: 'E06666', name: 'Dark Red (VTech Installers)' },
-                      { hex: 'F4CCCC', name: 'Light Red (VTech Programmers)' },
-                      { hex: 'F9CB9C', name: 'Orange (VTECH PM)' },
-                      { hex: '9900FF', name: 'Purple (Electrician)' },
-                      { hex: 'FF00FF', name: 'Magenta (Client / Architect)' },
-                      { hex: '666666', name: 'Grey (VTECH Sales)' },
-                    ].map((c) => (
-                      <button
-                        key={c.hex}
-                        type="button"
-                        onClick={() => {
-                          setStepSheetColour(c.hex);
-                          if (c.hex === 'D9EAD3') {
-                            setStepPhase(1);
-                            setStepGate('none');
-                          } else {
-                            setStepPhase(2);
-                            setStepGate('after_external');
-                          }
-                        }}
-                        className={`h-6 w-6 rounded-full border-2 transition-transform ${
-                          stepSheetColour.toLowerCase() === c.hex.toLowerCase()
-                            ? 'scale-110 border-text-primary ring-2 ring-accent'
-                            : 'border-black/20 hover:scale-105'
-                        }`}
-                        style={{ backgroundColor: `#${c.hex}` }}
-                        title={c.name}
-                      />
-                    ))}
+                  <div className="flex justify-between">
+                    <span>Phase & Gate:</span>
+                    <strong className="text-text-primary">
+                      Phase {stepPhase} ({stepPhase === 2 ? 'after_external' : stepGate})
+                    </strong>
                   </div>
                 </div>
 
@@ -792,7 +868,7 @@ export default function AdminPage() {
           {[
             { id: 'users', label: `Staff Accounts (${users.length})` },
             { id: 'assignments', label: 'Project Assignment' },
-            { id: 'catalogue', label: `Product Catalogue (${catalogueProducts.length})` },
+            { id: 'catalogue', label: `Task Catalog (${catalogueProducts.length})` },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1000,12 +1076,12 @@ export default function AdminPage() {
 
 
 
-        {/* ───────────────────────── TAB 4: PRODUCT CATALOGUE (v3 P5) ───────────────────────── */}
+        {/* ───────────────────────── TAB 4: TASK CATALOG ───────────────────────── */}
         {activeTab === 'catalogue' && (
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <h2 className="text-sm font-bold text-text-primary">Product Catalogue (v3)</h2>
+                <h2 className="text-sm font-bold text-text-primary">Task Catalog</h2>
                 <p className="text-xs text-text-secondary mt-0.5">
                   Products VTech sells, location presets, and delivery milestone step chains.
                 </p>

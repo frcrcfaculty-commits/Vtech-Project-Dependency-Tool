@@ -693,7 +693,7 @@ export default function ProjectsPage() {
                         .join(' · ')}
                     </p>
                     <p className="text-[11px] text-text-muted mt-0.5">
-                      {products.length} Current BOQ lines · Status:{' '}
+                      {products.length} BOQ lines · Status:{' '}
                       <span className="font-semibold uppercase">{selectedProject.status}</span>
                     </p>
                   </div>
@@ -749,7 +749,7 @@ export default function ProjectsPage() {
                 {/* Tabs Order: 1. Current BOQ · 2. BOQ History · 3. Initial BOQ · 4. Conso */}
                 <div className="flex flex-wrap gap-1 border-b border-border text-xs sm:text-sm mt-4">
                   {[
-                    { id: 'current', label: `1. Current BOQ (${products.length})` },
+                    { id: 'current', label: `1. BOQ (${products.length})` },
                     { id: 'history', label: '2. BOQ History' },
                     { id: 'initial', label: `3. Initial BOQ (${initialEvents.length})` },
                     { id: 'conso', label: `4. Conso (${consoGroupedData.totalDistinctProducts})` },
@@ -878,53 +878,11 @@ export default function ProjectsPage() {
                                           )}
                                         </div>
 
-                                        {/* Quantity, Progress Chip, and Mini Status Bar */}
-                                        <div className="flex flex-wrap items-center md:items-end justify-between md:justify-end gap-3 shrink-0">
-                                          <div className="flex items-center gap-2">
-                                            <span className="rounded bg-surface-alt px-2 py-1 text-xs font-bold text-text-primary">
-                                              Qty: {it.quantity || 1}
-                                            </span>
-
-                                            {/* Progress Chip: green / amber / red */}
-                                            {totalCount > 0 && (
-                                              <span
-                                                className={`rounded px-2 py-1 text-[11px] font-bold border ${
-                                                  doneCount === totalCount
-                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                    : doneCount > 0
-                                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                                    : 'bg-rose-50 text-rose-700 border-rose-200'
-                                                }`}
-                                              >
-                                                {doneCount}/{totalCount} done
-                                              </span>
-                                            )}
-                                          </div>
-
-                                          {/* Mini Status Bar with check / cross */}
-                                          {steps.length > 0 && (
-                                            <div
-                                              className="flex h-3.5 w-full md:w-36 overflow-hidden rounded bg-surface-alt ring-1 ring-border"
-                                              title={`${doneCount} of ${totalCount} steps completed`}
-                                            >
-                                              {steps.map((r) => {
-                                                const c = stepColour(r.sheet_colour);
-                                                const done = isDone(r.status);
-                                                const isStuck = r.status === 'pending';
-                                                return (
-                                                  <div
-                                                    key={r.item_id}
-                                                    className="relative flex flex-1 items-center justify-center transition-all"
-                                                    style={{ backgroundColor: c.bg }}
-                                                    title={`${r.label}: ${r.status}`}
-                                                  >
-                                                    {done && <MiniCheckIcon color={c.text} />}
-                                                    {isStuck && <MiniXIcon color={c.text} />}
-                                                  </div>
-                                                );
-                                              })}
-                                            </div>
-                                          )}
+                                        {/* Quantity only (dependency colour bar & progress chip removed for BOQ tab) */}
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <span className="rounded bg-surface-alt px-2.5 py-1 text-xs font-bold text-text-primary border border-border">
+                                            Qty: {it.quantity || 1}
+                                          </span>
                                         </div>
                                       </div>
                                     );
