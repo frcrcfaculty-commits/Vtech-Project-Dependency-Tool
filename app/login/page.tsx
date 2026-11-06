@@ -48,7 +48,7 @@ export default function LoginPage() {
       <div className="relative w-full max-w-sm">
         {/* Branding header */}
         <div className="mb-8 text-center">
-          <VTechLogo tone="white" className="mx-auto h-10 w-auto drop-shadow-[0_6px_18px_rgba(10,0,60,0.35)]" />
+          <VTechLogo tone="white" className="mx-auto h-16 w-auto shadow-[0_6px_18px_rgba(10,0,60,0.35)]" />
           <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/75">
             Leading the technology curve
           </p>

@@ -46,7 +46,7 @@ export function AppHeader() {
               aria-label="VTech – Site Tracker home"
               className="flex items-center gap-2.5 hover:opacity-85 transition-opacity"
             >
-              <VTechLogo className="h-[22px] w-auto" />
+              <VTechLogo className="h-9 w-auto" />
               <span className="hidden sm:inline border-l border-border pl-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">
                 Site Tracker
               </span>

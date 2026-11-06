@@ -138,7 +138,8 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
     ];
     // Email-client-safe HTML: table layout, inline styles, bgcolor attributes (Outlook ignores CSS backgrounds
     // on some elements), system fonts only, no <style>, no web fonts, no images except the optional logo.
-    const logoUrl = process.env.NEXT_PUBLIC_LOGO_URL;
+    // VTech logo (public/vtech-logo-email.png); NEXT_PUBLIC_LOGO_URL overrides the hosted copy.
+    const logoUrl = process.env.NEXT_PUBLIC_LOGO_URL || 'https://vtech-hansal.zocomputer.io/vtech-logo-email.png';
     const F = 'font-family:Arial,Helvetica,sans-serif';
     const td = `${F};padding:8px 6px;border-bottom:1px solid #e4e7ec;font-size:13px;line-height:18px;vertical-align:top`;
     const th = `${F};padding:8px 6px;font-size:12px;line-height:16px;font-weight:bold;color:#475467;text-align:left;border-bottom:2px solid #d0d5dd`;
@@ -157,7 +158,7 @@ export function buildAgencyReport(input: ReportInput): BuiltReport {
       <tr><td style="padding:16px 16px 6px 16px">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
           <tr>
-            ${logoUrl ? `<td width="140" valign="middle" style="padding-right:12px"><img src="${esc(logoUrl)}" alt="VTech Technologies" width="120" style="display:block;border:0;outline:none;width:120px;height:auto"></td>` : ''}
+            ${logoUrl ? `<td width="166" valign="middle" style="padding-right:12px"><img src="${esc(logoUrl)}" alt="VTech – Luxury Home Automation" width="150" style="display:block;border:0;outline:none;width:150px;height:auto"></td>` : ''}
             <td valign="middle" style="${F};font-size:12px;line-height:16px;color:#667085">VTech Technologies · Site dependency report</td>
           </tr>
         </table>

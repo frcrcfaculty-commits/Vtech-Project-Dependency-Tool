@@ -5,7 +5,7 @@ import 'regenerator-runtime/runtime.js';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFPage } from 'pdf-lib';
 import { daysOpen } from '../report';
-import { draw, drawLogo, formatDate, roomLabel, sanitize, width, wrap, type Face, type PdfFonts } from './pendingReport';
+import { draw, drawLogo, registerLogo, formatDate, roomLabel, sanitize, width, wrap, type Face, type PdfFonts } from './pendingReport';
 
 export interface PortfolioItem {
   floorLabel: string; floorSort: number; roomName: string; roomSort: number;
@@ -45,6 +45,7 @@ const GREY = rgb(0.4, 0.42, 0.46), LINE = rgb(0.86, 0.87, 0.9);
 
 export async function buildPortfolioPdf(input: PortfolioInput, fonts: PdfFonts): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  await registerLogo(doc);
   doc.registerFontkit(fontkit);
   doc.setTitle(`VTech – all pending items – ${input.generatedOn}`);
   doc.setProducer('VTech Site Dependency Tracker');

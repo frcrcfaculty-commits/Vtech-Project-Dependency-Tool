@@ -897,19 +897,6 @@ function Dashboard() {
         </div>
       </main>
 
-      {/* Floating buttons: "Send reminders" stacked 12px above "Add dependency" at bottom-right */}
-      <button
-        type="button"
-        onClick={sendReminders}
-        disabled={busy === 'remind'}
-        aria-label="Send reminders"
-        className="fixed bottom-[82px] right-6 z-40 flex items-center gap-2 rounded-full bg-accent py-2 pl-3 pr-4 text-sm font-semibold text-white shadow-xl transition hover:scale-105 active:scale-95 disabled:opacity-50"
-      >
-        <Glyph name="send" className="h-4 w-4" />
-        <span className="hidden sm:inline">Send reminders</span>
-        <span className="sm:hidden text-xs">Reminders</span>
-      </button>
-
       {stepRow && (
         <StepDialog
           row={stepRow}
