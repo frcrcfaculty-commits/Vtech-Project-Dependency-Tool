@@ -126,9 +126,9 @@ export async function buildBoqComparisonPdf(
   const compCols = [
     { key: 'no', title: 'No', w: 26, align: 'center' },
     { key: 'group', title: 'Conso Group', w: 105, align: 'left' },
-    { key: 'product', title: 'Product Catalogue Title', w: 175, align: 'left' },
-    { key: 'init', title: initialHeaderLabel, w: 55, align: 'center' },
-    { key: 'curr', title: currentHeaderLabel, w: 55, align: 'center' },
+    { key: 'product', title: 'Product Catalogue Title', w: 145, align: 'left' },
+    { key: 'init', title: initialHeaderLabel, w: 70, align: 'center' },
+    { key: 'curr', title: currentHeaderLabel, w: 70, align: 'center' },
     { key: 'diff', title: 'Diff', w: 57.28, align: 'center' },
   ] as const;
 
