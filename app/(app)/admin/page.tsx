@@ -705,9 +705,10 @@ export default function AdminPage() {
                       { hex: 'C9DAF8', name: 'Blue (Phase 2 other agencies)' },
                       { hex: 'E06666', name: 'Dark Red (VTech Installers)' },
                       { hex: 'F4CCCC', name: 'Light Red (VTech Programmers)' },
-                      { hex: 'F9CB9C', name: 'Orange (VTECH PM, handover docs)' },
+                      { hex: 'F9CB9C', name: 'Orange (VTECH PM)' },
                       { hex: '9900FF', name: 'Purple (Electrician)' },
-                      { hex: 'FF00FF', name: 'Magenta (VTECH PM)' },
+                      { hex: 'FF00FF', name: 'Magenta (Client / Architect)' },
+                      { hex: '666666', name: 'Grey (VTECH Sales)' },
                     ].map((c) => (
                       <button
                         key={c.hex}

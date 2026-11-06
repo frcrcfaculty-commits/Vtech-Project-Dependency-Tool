@@ -149,7 +149,7 @@ const PAD = 4;
 const COLS = [
   { key: 'no', title: 'No', w: 26 },
   { key: 'room', title: 'Room', w: 130 },
-  { key: 'agency', title: 'Agency', w: 82 },
+  { key: 'agency', title: 'Blocked by', w: 82 },
   { key: 'dep', title: 'Dependency', w: 170 },
   { key: 'first', title: 'First raised', w: 61 },
   { key: 'rem', title: 'Reminder #', w: 54.28 },
