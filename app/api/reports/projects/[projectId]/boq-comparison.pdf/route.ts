@@ -2,6 +2,7 @@ import { handle, HttpError, requireUser } from '@/lib/auth';
 import { loadPdfFonts } from '@/lib/pdf/fonts';
 import {
   buildBoqComparisonPdf,
+  formatISTDate,
   type BoqComparisonItem,
   type BoqComparisonChangeEvent,
 } from '@/lib/pdf/boqComparisonReport';
@@ -28,10 +29,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ projectId: stri
     // 2. Initial BOQ from boq_events (added and change_id is null)
     const { data: initialEvents, error: iErr } = await db
       .from('boq_events')
-      .select('product, quantity')
+      .select('product, quantity, at')
       .eq('project_id', projectId)
       .eq('event', 'added')
-      .is('change_id', null);
+      .is('change_id', null)
+      .order('at', { ascending: true });
     if (iErr) throw iErr;
 
     // 3. Current BOQ from room_products (with conso info from catalogue)
@@ -162,12 +164,18 @@ export async function GET(req: Request, ctx: { params: Promise<{ projectId: stri
     }));
 
     const generatedOn = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+    const earliestInitialAt = (initialEvents as { at?: string }[])?.[0]?.at ?? null;
+    const initialBoqDate = earliestInitialAt ? formatISTDate(earliestInitialAt) : null;
+    const currentBoqDate = formatISTDate(new Date().toISOString());
+
     const pdf = await buildBoqComparisonPdf(
       {
         projectName: project.name,
         clientName: project.client_name,
         siteAddress: project.site_address,
         generatedOn,
+        initialBoqDate,
+        currentBoqDate,
         comparisonItems,
         changeEvents,
       },

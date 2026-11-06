@@ -44,8 +44,22 @@ export interface BoqComparisonPdfInput {
   clientName: string | null;
   siteAddress: string | null;
   generatedOn: string;
+  initialBoqDate?: string | null;
+  currentBoqDate?: string | null;
   comparisonItems: BoqComparisonItem[];
   changeEvents: BoqComparisonChangeEvent[];
+}
+
+export function formatISTDate(iso?: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 export async function buildBoqComparisonPdf(
@@ -101,29 +115,48 @@ export async function buildBoqComparisonPdf(
   draw(page, 'Product-wise Variance (in Conso Group Order)', M, y - 11, bold, 11);
   y -= 16;
 
+  const initialHeaderLabel = input.initialBoqDate
+    ? `Initial BOQ\n(${input.initialBoqDate})`
+    : 'Initial BOQ';
+  const currentHeaderLabel = input.currentBoqDate
+    ? `Current\n(${input.currentBoqDate})`
+    : 'Current';
+
   const compCols = [
-    { key: 'no', title: 'No', w: 26 },
-    { key: 'group', title: 'Conso Group', w: 105 },
-    { key: 'product', title: 'Product Catalogue Title', w: 175 },
-    { key: 'init', title: 'Initial', w: 55 },
-    { key: 'curr', title: 'Current', w: 55 },
-    { key: 'diff', title: 'Diff', w: 57.28 },
+    { key: 'no', title: 'No', w: 26, align: 'center' },
+    { key: 'group', title: 'Conso Group', w: 105, align: 'left' },
+    { key: 'product', title: 'Product Catalogue Title', w: 175, align: 'left' },
+    { key: 'init', title: initialHeaderLabel, w: 55, align: 'center' },
+    { key: 'curr', title: currentHeaderLabel, w: 55, align: 'center' },
+    { key: 'diff', title: 'Diff', w: 57.28, align: 'center' },
   ] as const;
 
   const compHeader = () => {
+    const headerHeight = 2 * LH + 2 * PAD;
     page.drawRectangle({
       x: M,
-      y: y - LH - 2 * PAD + 2,
+      y: y - headerHeight + 2,
       width: A4[0] - 2 * M,
-      height: LH + 2 * PAD,
+      height: headerHeight,
       color: rgb(0.95, 0.96, 0.97),
     });
     let x = M;
     for (const c of compCols) {
-      draw(page, c.title, x + PAD, y - LH + 1, bold, FS, GREY);
+      const lines = c.title.split('\n');
+      let hy = lines.length === 1 ? y - LH - PAD / 2 : y - LH + 2;
+      for (const line of lines) {
+        if (c.align === 'center') {
+          const tw = bold.latin.widthOfTextAtSize(line, FS);
+          const cx = x + Math.max(0, (c.w - tw) / 2);
+          draw(page, line, cx, hy, bold, FS, GREY);
+        } else {
+          draw(page, line, x + PAD, hy, bold, FS, GREY);
+        }
+        hy -= LH - 1;
+      }
       x += c.w;
     }
-    y -= LH + 2 * PAD;
+    y -= headerHeight;
   };
 
   compHeader();
@@ -163,7 +196,13 @@ export async function buildBoqComparisonPdf(
         const colColor = c.key === 'diff' ? diffColor : undefined;
         const fontFace = c.key === 'diff' && item.diff !== 0 ? bold : body;
         for (const line of wrapped[colIdx]) {
-          draw(page, line, x + PAD, cy, fontFace, FS, colColor);
+          if (c.align === 'center') {
+            const tw = fontFace.latin.widthOfTextAtSize(line, FS);
+            const cx = x + Math.max(0, (c.w - tw) / 2);
+            draw(page, line, cx, cy, fontFace, FS, colColor);
+          } else {
+            draw(page, line, x + PAD, cy, fontFace, FS, colColor);
+          }
           cy -= LH;
         }
         x += c.w;
@@ -254,10 +293,13 @@ export async function buildBoqComparisonPdf(
       let x = M;
       chgCols.forEach((c, colIdx) => {
         let cy = y - PAD - FS;
-        const fontFace = c.key === 'event' ? bold : body;
-        const color = c.key === 'event' && ev.event === 'added' ? GREEN : c.key === 'event' && ev.event === 'removed' ? RED : undefined;
+        const isEvent = c.key === 'event';
+        const eventColor =
+          ev.event === 'added' ? GREEN : ev.event === 'removed' ? RED : undefined;
+        const fontFace = isEvent ? bold : body;
+
         for (const line of wrapped[colIdx]) {
-          draw(page, line, x + PAD, cy, fontFace, FS, color);
+          draw(page, line, x + PAD, cy, fontFace, FS, eventColor);
           cy -= LH;
         }
         x += c.w;
@@ -273,12 +315,18 @@ export async function buildBoqComparisonPdf(
     });
   }
 
-  // Footer page numbers
-  pages.forEach((p, i) => {
-    const foot = `Page ${i + 1} of ${pages.length} · VTech Site Tracker`;
-    draw(p, foot, M, M, body, 8, GREY);
+  // Footer on all pages
+  const totalPages = pages.length;
+  pages.forEach((p, idx) => {
+    p.drawLine({
+      start: { x: M, y: M + 14 },
+      end: { x: A4[0] - M, y: M + 14 },
+      color: LINE,
+      thickness: 0.5,
+    });
+    draw(p, 'Confidential · VTech Project Dependency Tool', M, M + 4, body, 8, GREY);
+    draw(p, `Page ${idx + 1} of ${totalPages}`, A4[0] - M - 55, M + 4, body, 8, GREY);
   });
 
   return doc.save();
 }
-
